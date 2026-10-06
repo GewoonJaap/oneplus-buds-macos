@@ -335,7 +335,7 @@ struct PickerRow: View {
 }
 
 let eqOptions = [("balanced", "Balanced"), ("bold", "Bold"), ("serenade", "Serenade"), ("bassboost", "Bass boost"), ("dynaudio", "Dynaudio")]
-let spatialOptions = [("off", "Off", "person.fill"), ("fixed", "Fixed", "person.wave.2.fill"), ("headtracked", "Head Tracked", "person.line.dotted.person.fill")]
+let spatialOptions = [("off", "Off", "person.fill"), ("fixed", "Fixed", "person.wave.2.fill"), ("headtracked", "Head Tracked", "person.spatialaudio.fill")]
 
 struct SpatialRow: View {
     let symbol: String
@@ -571,8 +571,8 @@ struct Panel: View {
             }
 
             HStack(spacing: 4) {
-                BatteryRing(title: "Left", symbol: "earbuds", cell: s.connected ? s.battery?.left : nil)
-                BatteryRing(title: "Right", symbol: "earbuds", cell: s.connected ? s.battery?.right : nil)
+                BatteryRing(title: "Left", symbol: "airpods.pro.left", cell: s.connected ? s.battery?.left : nil)
+                BatteryRing(title: "Right", symbol: "airpods.pro.right", cell: s.connected ? s.battery?.right : nil)
                 BatteryRing(title: "Case", symbol: "earbuds.case", cell: s.connected ? s.battery?.case : nil)
             }
 
