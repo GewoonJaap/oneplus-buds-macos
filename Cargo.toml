@@ -1,0 +1,42 @@
+[package]
+name = "buds-ctl"
+version = "0.1.0"
+edition = "2021"
+description = "Control OnePlus Buds Pro 3 (noise control, battery, ...) from macOS"
+
+[lib]
+name = "buds"
+path = "src/lib.rs"
+
+[[bin]]
+name = "buds"
+path = "src/bin/buds.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+
+[features]
+clap = []
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5.2"
+block2 = "0.5.1"
+objc2-foundation = { version = "0.2.2", features = ["NSArray", "NSData", "NSError", "NSString", "NSObject", "NSDictionary", "NSValue", "NSUUID", "NSEnumerator"] }
+objc2-core-bluetooth = { version = "0.2.2", features = ["all"] }
+
+[[bin]]
+name = "buds-menubar"
+path = "src/bin/buds-menubar.rs"
+
+[target.'cfg(target_os = "macos")'.dependencies.tray-icon]
+version = "0.21"
+default-features = false
+
+[target.'cfg(target_os = "macos")'.dependencies.tao]
+version = "0.34"
+
+[[bin]]
+name = "buds-daemon"
+path = "src/bin/buds-daemon.rs"

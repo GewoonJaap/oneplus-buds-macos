@@ -1,0 +1,57 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # The UI uses the macOS 26 Liquid Glass API, which needs the macOS 26 SDK.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Test
+        run: cargo test --lib
+
+      - name: Compute version
+        id: v
+        run: |
+          base=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=${base%.*}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Build app bundle
+        run: |
+          bash scripts/bundle.sh
+          cd target/release
+          ditto -c -k --keepParent Buds.app "Buds-${{ steps.v.outputs.version }}-macos.zip"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.v.outputs.version }}" \
+            "target/release/Buds-${{ steps.v.outputs.version }}-macos.zip" \
+            --target "$GITHUB_SHA" \
+            --title "Buds ${{ steps.v.outputs.version }}" \
+            --generate-notes

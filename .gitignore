@@ -1,0 +1,21 @@
+target/
+# Raw captures/probes contain device names, MAC addresses and paired host names
+capture/
+probe/
+.DS_Store
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Build and release artifacts
+*.app/
+*.zip
+*.dSYM/
+
+# Local secrets and logs
+.env
+*.log
+*.btsnoop
