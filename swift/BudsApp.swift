@@ -648,6 +648,20 @@ struct ChargeSpan: Identifiable {
     var mid: Date { Date(timeIntervalSince1970: (start.timeIntervalSince1970 + end.timeIntervalSince1970) / 2) }
 }
 
+struct StatRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(L(title)).font(.system(size: 13))
+            Spacer()
+            Text(value).font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+    }
+}
+
 struct StatsPage: View {
     @ObservedObject var history: History
     let back: () -> Void
@@ -684,8 +698,43 @@ struct StatsPage: View {
         return (points, spans, bucket, from, now)
     }
 
+    private struct Summary {
+        var drainPerHour: Double?
+        var chargeSeconds: Double = 0
+        var average: Double?
+    }
+
+    private func summary() -> Summary {
+        let from = Date().addingTimeInterval(-Double(hours) * 3600).timeIntervalSince1970
+        let pts = history.samples.filter { $0.t >= from }.compactMap { s in s.level(side).map { (t: s.t, pct: $0.pct, ch: $0.charging) } }
+        var out = Summary()
+        var drop = 0.0, hrs = 0.0
+        for (a, b) in zip(pts, pts.dropFirst()) {
+            let dt = b.t - a.t
+            guard dt > 0, dt <= 1800 else { continue }
+            if !a.ch && !b.ch {
+                drop += Double(max(0, a.pct - b.pct))
+                hrs += dt / 3600
+            } else if a.ch && b.ch {
+                out.chargeSeconds += dt
+            }
+        }
+        if hrs >= 0.25, drop > 0 { out.drainPerHour = drop / hrs }
+        if !pts.isEmpty { out.average = Double(pts.map(\.pct).reduce(0, +)) / Double(pts.count) }
+        return out
+    }
+
+    private func duration(_ seconds: Double) -> String {
+        let f = DateComponentsFormatter()
+        f.allowedUnits = [.day, .hour, .minute]
+        f.unitsStyle = .abbreviated
+        f.maximumUnitCount = 2
+        return f.string(from: max(seconds, 60)) ?? "–"
+    }
+
     var body: some View {
         let d = data()
+        let sum = summary()
         VStack(alignment: .leading, spacing: 14) {
             Button(action: back) {
                 HStack(spacing: 4) {
@@ -751,6 +800,17 @@ struct StatsPage: View {
                 Text("7 days").tag(168)
             }
             .pickerStyle(.segmented).labelsHidden()
+
+            VStack(spacing: 0) {
+                StatRow(title: "Average Drain", value: sum.drainPerHour.map { String(format: "%.1f %%/h", $0) } ?? "–")
+                Divider().padding(.leading, 12)
+                StatRow(title: "Estimated Battery Life", value: sum.drainPerHour.map { duration(100 / $0 * 3600) } ?? "–")
+                Divider().padding(.leading, 12)
+                StatRow(title: "Time Charging", value: sum.chargeSeconds >= 60 ? duration(sum.chargeSeconds) : "–")
+                Divider().padding(.leading, 12)
+                StatRow(title: "Average Level", value: sum.average.map { String(format: "%.0f%%", $0) } ?? "–")
+            }
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.5)))
         }
     }
 }
