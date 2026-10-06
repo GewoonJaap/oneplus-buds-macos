@@ -4,6 +4,8 @@ Native macOS control for OnePlus Buds Pro 3 (HeyMelody features, without the pho
 battery, noise control (Off / Transparency / Adaptive / Noise Cancellation High-Medium-Low),
 equalizer presets and spatial audio. Changes made on the phone show up live.
 
+<img width="361" height="515" alt="Screenshot" src="https://github.com/user-attachments/assets/47b7002d-9c31-4cbd-845d-1a79e035ec1d" />
+
 - `buds` – CLI (`buds status`, `buds set <mode>`, `buds eq`, `buds spatial`, ...)
 - `Buds.app` – menu bar app (SwiftUI panel + Rust Bluetooth daemon). Needs macOS 14+; Liquid Glass on macOS 26+.
 
