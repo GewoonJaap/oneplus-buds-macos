@@ -164,21 +164,45 @@ final class Daemon: ObservableObject {
 
 // MARK: - Views
 
+struct ChargingPulse: ViewModifier {
+    let active: Bool
+    let color: Color
+    var scale: CGFloat = 1
+
+    func body(content: Content) -> some View {
+        if active {
+            content.phaseAnimator([0.0, 1.0]) { view, p in
+                view
+                    .opacity(0.72 + 0.28 * p)
+                    .scaleEffect(1 + (scale - 1) * p)
+                    .shadow(color: color.opacity(0.75 * p), radius: 1 + 5 * p)
+            } animation: { _ in .easeInOut(duration: 1.3) }
+        } else {
+            content
+        }
+    }
+}
+
 struct BatteryRing: View {
     let title: String
     let symbol: String
     let cell: CellState?
+    @AppStorage("lowThreshold") private var lowThreshold = 20
+
+    private var isLow: Bool { cell.map { !$0.charging && $0.percent <= lowThreshold } ?? false }
 
     var body: some View {
         VStack(spacing: 6) {
             ZStack {
-                Circle().stroke(.quaternary, lineWidth: 5)
+                Circle().stroke(Color.primary.opacity(0.22), lineWidth: 6)
                 if let c = cell {
                     Circle()
                         .trim(from: 0, to: CGFloat(c.percent) / 100)
-                        .stroke(c.percent <= 20 && !c.charging ? Color.red : Color.green,
-                                style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                        .stroke(isLow ? Color(red: 1.0, green: 0.27, blue: 0.23) : Color(red: 0.2, green: 0.86, blue: 0.38),
+                                style: StrokeStyle(lineWidth: 6, lineCap: .round))
                         .rotationEffect(.degrees(-90))
+                        .animation(.easeInOut(duration: 0.6), value: c.percent)
+                        .modifier(ChargingPulse(active: c.charging, color: Color(red: 0.2, green: 0.86, blue: 0.38)))
                 }
                 Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(.primary)
                 if cell?.charging == true {
@@ -188,8 +212,12 @@ struct BatteryRing: View {
             }
             .frame(width: 52, height: 52)
             HStack(spacing: 2) {
-                if cell?.charging == true { Image(systemName: "bolt.fill").font(.system(size: 9)).foregroundStyle(.green) }
+                if cell?.charging == true {
+                    Image(systemName: "bolt.fill").font(.system(size: 9)).foregroundStyle(Color(red: 0.2, green: 0.86, blue: 0.38))
+                        .modifier(ChargingPulse(active: true, color: Color(red: 0.2, green: 0.86, blue: 0.38), scale: 1.25))
+                }
                 Text(cell.map { "\($0.percent)%" } ?? "–").font(.system(size: 12, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(isLow ? Color(red: 1.0, green: 0.27, blue: 0.23) : Color.primary)
             }
             Text(L(title)).font(.system(size: 11)).foregroundStyle(.secondary)
         }

@@ -350,7 +350,7 @@ pub struct Battery {
 }
 
 /// Payload: `00 <count> (<dev> <level|0x80=charging>)*` with dev 1=left, 2=right, 3=case.
-/// Layout confirmed on real Buds Pro 3 (left+right entries); the case entry follows the public notes.
+/// Layout confirmed on real Buds Pro 3 (left, right and case entries, charging bit included).
 pub fn parse_battery(p: &[u8]) -> Battery {
     let mut b = Battery::default();
     let count = p.get(1).copied().unwrap_or(0) as usize;

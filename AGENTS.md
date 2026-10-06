@@ -51,7 +51,7 @@ Handshake: hello `aa070000000101000012`, wait at least 2 s, register `aa0c000000
 | Noise query | `0c 01` | `01 01`, reply `0c 81` with `p[1]==1` |
 | Noise set | `04 04` | `01 01 <b>`: Off 08 (Android sends 01, both work), Transparency 04, High 10, Medium 20, Low 40, Adaptive 80 |
 | Hold-cycle mask query | `0c 01` | `02 01`, reply `0c 81` with `p[1]==2`, mask in `p[3]` |
-| Battery | `06 01`, reply `06 81` | `00 <n> (dev level\|0x80 charging)*`, dev 1 L, 2 R, 3 case (case never seen filled yet) |
+| Battery | `06 01`, reply `06 81` | `00 <n> (dev level\|0x80 charging)*`, dev 1 L, 2 R, 3 case; the 0x80 bit is charging (confirmed live: earbuds 50% charging, case 30% not charging) |
 | EQ read / set | `0f 01` / `06 04` | read empty, reply `00 <id>`; set `<id>`: 0 Balanced, 1 Bold, 2 Serenade, 3 Bass boost, 7 Dynaudio |
 | Spatial read / set | `2a 01` / `22 04` | reply `00 <mode>`; set `<mode>`: 0 off, 1 fixed, 2 head tracking |
 | Switch list read | `0d 01` | `0c 05 04 0b 11 13 18 06 1b 1d 1c 27 28`, reply `00 <n> (id value)*` |
@@ -68,7 +68,7 @@ Unverified (from the public doc, still to capture): find earbuds `00 04`, dual c
 Gotchas:
 - `decode` only turns a `0c 81` reply into `Event::Noise` when `payload[1] == 1`. Other sub-queries (hold mask, ANC level) share the opcode and must stay `Event::Other`.
 - Early guessed opcodes returned a generic ack that looked like success while changing nothing. Always read back.
-- The case entry in the battery reply is unverified; the UI shows a dash and omits it from the menu bar when absent.
+- The case entry only appears when the buds report it (buds in or near the case); otherwise the UI shows a dash and omits it from the menu bar.
 
 ## How opcodes were found
 
