@@ -1,5 +1,5 @@
 use anyhow::Result;
-use buds::{protocol::{Eq, Mode, Spatial}, session::Session};
+use buds::{protocol::{by_name, name_of, Action, Eq, Gesture, Mode, Side, Spatial, HOLD_ANC, HOLD_OFF, HOLD_TRANSPARENCY}, session::Session};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -26,6 +26,14 @@ enum Cmd {
     Eq { preset: Option<String> },
     /// Set spatial audio: off, fixed, head
     Spatial { mode: String },
+    /// Game mode: on, off (omit to read)
+    Game { state: Option<String> },
+    /// Show all earbud gestures
+    Gestures,
+    /// Set a gesture: gesture <left|right> <press|double|triple|swipe> <none|playpause|previous|next|voice|gamemode|volume|skiptrack>
+    Gesture { side: String, gesture: String, action: String },
+    /// Hold-gesture noise cycle: hold [off,anc,transparency comma list]
+    Hold { modes: Option<String> },
     Listen { #[arg(default_value_t = 30)] seconds: u64 },
 }
 
@@ -103,6 +111,55 @@ fn main() -> Result<()> {
             };
             s.set_spatial(m)?;
             println!("OK: Spatial audio {}", m.label());
+        }
+        Cmd::Game { state } => {
+            let now = match state.as_deref() {
+                None => s.query_game()?,
+                Some("on") => s.set_game(true)?,
+                Some("off") => s.set_game(false)?,
+                Some(o) => anyhow::bail!("unknown state '{o}' (on, off)"),
+            };
+            println!("Game mode: {}", match now { Some(true) => "on", Some(false) => "off", None => "unknown" });
+        }
+        Cmd::Gestures => {
+            let g = s.query_gestures()?;
+            for side in Side::ALL {
+                for gest in Gesture::ALL {
+                    let a = g.iter().find(|(sd, gs, _)| *sd == side as u8 && *gs == gest as u8).map(|e| e.2);
+                    println!("{:?} {:?}: {}", side, gest, a.and_then(Action::from_id).map(name_of).unwrap_or_else(|| format!("{a:?}")));
+                }
+            }
+            let m = s.query_hold()?;
+            println!("Hold cycle: off={} anc={} transparency={}", m & HOLD_OFF != 0, m & HOLD_ANC != 0, m & HOLD_TRANSPARENCY != 0);
+        }
+        Cmd::Gesture { side, gesture, action } => {
+            let (Some(sd), Some(g), Some(a)) = (by_name(&Side::ALL, &side), by_name(&Gesture::ALL, &gesture), by_name(&Action::ALL, &action)) else {
+                anyhow::bail!("unknown side/gesture/action")
+            };
+            if !g.actions().contains(&a) {
+                anyhow::bail!("{action} is not valid for {gesture}")
+            }
+            let now = s.set_gesture(sd, g, a)?;
+            let got = now.iter().find(|(x, y, _)| *x == sd as u8 && *y == g as u8).map(|e| e.2);
+            println!("{side} {gesture}: {:?}", got.and_then(Action::from_id).map(name_of));
+        }
+        Cmd::Hold { modes } => {
+            let mask = match modes {
+                None => s.query_hold()?,
+                Some(list) => {
+                    let mut m = 0;
+                    for part in list.split(',') {
+                        m |= match part.trim() {
+                            "off" => HOLD_OFF,
+                            "anc" => HOLD_ANC,
+                            "transparency" => HOLD_TRANSPARENCY,
+                            o => anyhow::bail!("unknown '{o}' (off, anc, transparency)"),
+                        };
+                    }
+                    s.set_hold(m)?
+                }
+            };
+            println!("Hold cycle: off={} anc={} transparency={}", mask & HOLD_OFF != 0, mask & HOLD_ANC != 0, mask & HOLD_TRANSPARENCY != 0);
         }
         Cmd::Probe => {
             for lo in 0x01u8..=0x40 {

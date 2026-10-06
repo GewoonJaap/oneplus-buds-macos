@@ -1,7 +1,7 @@
 //! Headless Bluetooth worker for the native Swift UI. Reads commands from stdin
 //! (`mode <name>`, `eq <name>`, `spatial <name>`, `reconnect`), writes one JSON state
 //! line per change to stdout and to ~/Library/Application Support/Buds/state.json.
-use buds::protocol::{decode, Battery, Cell, Eq, Event, Mode, Spatial};
+use buds::protocol::{by_name, decode, name_of, parse_gestures, parse_switches, Action, Battery, Cell, Eq, Event, Gesture, Mode, Side, Spatial, SWITCH_GAME};
 use buds::session::Session;
 use std::io::{BufRead, Write};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -11,6 +11,9 @@ enum Cmd {
     Mode(Mode),
     Eq(Eq),
     Spatial(Spatial),
+    Game(bool),
+    Gesture(Side, Gesture, Action),
+    Hold(u8),
     Reconnect,
 }
 
@@ -21,6 +24,9 @@ struct State {
     bat: Option<Battery>,
     eq: Option<Eq>,
     sp: Option<Spatial>,
+    game: Option<bool>,
+    gestures: Vec<(u8, u8, u8)>,
+    hold: Option<u8>,
 }
 
 fn name<T: std::fmt::Debug>(v: Option<T>) -> String {
@@ -37,6 +43,23 @@ fn cell(c: Option<Cell>) -> String {
     }
 }
 
+fn gestures_json(g: &[(u8, u8, u8)]) -> String {
+    if g.is_empty() {
+        return "null".into();
+    }
+    let side = |s: Side| {
+        let fields: Vec<String> = Gesture::ALL
+            .iter()
+            .map(|gest| {
+                let a = g.iter().find(|(sd, gs, _)| *sd == s as u8 && *gs == *gest as u8).and_then(|e| Action::from_id(e.2));
+                format!("\"{}\":{}", name_of(gest), name(a))
+            })
+            .collect();
+        format!("\"{}\":{{{}}}", name_of(s), fields.join(","))
+    };
+    format!("{{{},{}}}", side(Side::Left), side(Side::Right))
+}
+
 impl State {
     fn json(&self) -> String {
         let bat = match self.bat {
@@ -44,12 +67,15 @@ impl State {
             None => "null".into(),
         };
         format!(
-            "{{\"connected\":{},\"mode\":{},\"battery\":{},\"eq\":{},\"spatial\":{}}}",
+            "{{\"connected\":{},\"mode\":{},\"battery\":{},\"eq\":{},\"spatial\":{},\"game\":{},\"gestures\":{},\"hold\":{}}}",
             self.connected,
             name(self.mode),
             bat,
             name(self.eq),
-            name(self.sp)
+            name(self.sp),
+            self.game.map_or("null".to_string(), |g| g.to_string()),
+            gestures_json(&self.gestures),
+            self.hold.map_or("null".to_string(), |h| h.to_string())
         )
     }
 }
@@ -75,13 +101,32 @@ fn publish(s: &State, last: &mut String) {
 fn parse_cmd(line: &str) -> Option<Cmd> {
     let mut it = line.split_whitespace();
     let (k, v) = (it.next()?, it.next().unwrap_or(""));
-    let find = |dbg: String| dbg.to_lowercase() == v;
     match k {
-        "mode" => Mode::ALL.into_iter().find(|m| find(format!("{m:?}"))).map(Cmd::Mode),
-        "eq" => Eq::ALL.into_iter().find(|m| find(format!("{m:?}"))).map(Cmd::Eq),
-        "spatial" => Spatial::ALL.into_iter().find(|m| find(format!("{m:?}"))).map(Cmd::Spatial),
+        "mode" => by_name(&Mode::ALL, v).map(Cmd::Mode),
+        "eq" => by_name(&Eq::ALL, v).map(Cmd::Eq),
+        "spatial" => by_name(&Spatial::ALL, v).map(Cmd::Spatial),
+        "game" => Some(Cmd::Game(v == "on")),
+        "hold" => v.parse().ok().map(Cmd::Hold),
+        "gesture" => {
+            let g = by_name(&Gesture::ALL, it.next()?)?;
+            let a = by_name(&Action::ALL, it.next()?)?;
+            let side = by_name(&Side::ALL, v)?;
+            g.actions().contains(&a).then_some(Cmd::Gesture(side, g, a))
+        }
         "reconnect" => Some(Cmd::Reconnect),
         _ => None,
+    }
+}
+
+fn refresh_extras(session: &mut Session, st: &mut State) {
+    if let Ok(g) = session.query_game() {
+        st.game = g;
+    }
+    if let Ok(g) = session.query_gestures() {
+        st.gestures = g;
+    }
+    if let Ok(h) = session.query_hold() {
+        st.hold = Some(h);
     }
 }
 
@@ -124,6 +169,7 @@ fn main() {
         if let Ok(m) = session.query_spatial() {
             st.sp = m;
         }
+        refresh_extras(&mut session, &mut st);
         publish(&st, &mut last);
 
         let mut last_poll = Instant::now();
@@ -133,6 +179,9 @@ fn main() {
                     Cmd::Mode(m) => session.set_mode(m).map(|c| st.mode = c).is_ok(),
                     Cmd::Eq(e) => session.set_eq(e).map(|n| st.eq = n).is_ok(),
                     Cmd::Spatial(m) => session.set_spatial(m).and_then(|_| session.query_spatial()).map(|n| st.sp = n).is_ok(),
+                    Cmd::Game(on) => session.set_game(on).map(|g| st.game = g).is_ok(),
+                    Cmd::Gesture(sd, g, a) => session.set_gesture(sd, g, a).map(|v| st.gestures = v).is_ok(),
+                    Cmd::Hold(m) => session.set_hold(m).map(|h| st.hold = Some(h)).is_ok(),
                     Cmd::Reconnect => false,
                 };
                 if !ok {
@@ -149,6 +198,11 @@ fn main() {
                         Some(Event::Other(0x0510, p)) if !p.is_empty() => {
                             st.sp = Spatial::ALL.into_iter().find(|m| *m as u8 == p[0])
                         }
+                        Some(Event::Other(0x8108, p)) => st.gestures = parse_gestures(&p),
+                        Some(Event::Other(0x810D, p)) => {
+                            st.game = parse_switches(&p).into_iter().find(|(i, _)| *i == SWITCH_GAME).map(|(_, v)| v != 0)
+                        }
+                        Some(Event::Other(0x810C, p)) if p.len() >= 4 && p[1] == 2 => st.hold = Some(p[3]),
                         _ => {}
                     }
                     publish(&st, &mut last);
@@ -165,6 +219,7 @@ fn main() {
                 if let Ok(b) = session.query_battery() {
                     st.bat = Some(b);
                 }
+                refresh_extras(&mut session, &mut st);
                 publish(&st, &mut last);
             }
         }

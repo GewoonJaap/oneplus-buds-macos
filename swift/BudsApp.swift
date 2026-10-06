@@ -5,7 +5,26 @@ import AppKit
 
 struct CellState: Codable, Equatable { var percent: Int; var charging: Bool }
 struct BatteryState: Codable, Equatable { var left: CellState?; var right: CellState?; var `case`: CellState? }
+struct GestureSet: Codable, Equatable {
+    var press: String?
+    var double: String?
+    var triple: String?
+    var swipe: String?
+
+    func action(_ g: String) -> String? {
+        switch g {
+        case "press": return press
+        case "double": return double
+        case "triple": return triple
+        default: return swipe
+        }
+    }
+}
+struct Gestures: Codable, Equatable { var left: GestureSet; var right: GestureSet }
 struct BudsState: Codable, Equatable {
+    var game: Bool?
+    var gestures: Gestures?
+    var hold: Int?
     var connected = false
     var mode: String?
     var battery: BatteryState?
@@ -54,6 +73,23 @@ final class Daemon: ObservableObject {
     func setMode(_ m: String) { state.mode = m; send("mode \(m)") }
     func setEq(_ e: String) { state.eq = e; send("eq \(e)") }
     func setSpatial(_ s: String) { state.spatial = s; send("spatial \(s)") }
+    func setGame(_ on: Bool) { state.game = on; send("game \(on ? "on" : "off")") }
+    func setHold(_ mask: Int) { state.hold = mask; send("hold \(mask)") }
+    func setGesture(side: String, gesture: String, action: String) {
+        if var g = state.gestures {
+            func apply(_ set: inout GestureSet) {
+                switch gesture {
+                case "press": set.press = action
+                case "double": set.double = action
+                case "triple": set.triple = action
+                default: set.swipe = action
+                }
+            }
+            if side == "left" { apply(&g.left) } else { apply(&g.right) }
+            state.gestures = g
+        }
+        send("gesture \(side) \(gesture) \(action)")
+    }
 }
 
 // MARK: - Views
@@ -261,10 +297,133 @@ struct SpatialRow: View {
 }
 let ncLevels = [("high", "High"), ("medium", "Medium"), ("low", "Low")]
 
-struct Panel: View {
+let actionLabels: [String: String] = [
+    "none": "None", "playpause": "Play/Pause", "previous": "Previous Track", "next": "Next Track",
+    "voice": "Voice Assistant", "gamemode": "Game Mode", "volume": "Volume Control", "skiptrack": "Skip Track",
+]
+let pressChoices = ["none", "playpause", "previous", "next", "voice", "gamemode"]
+let swipeChoices = ["none", "volume", "skiptrack"]
+let gestureRows: [(id: String, label: String, symbol: String)] = [
+    ("press", "Press", "hand.tap"),
+    ("double", "Press Twice", "hand.tap.fill"),
+    ("triple", "Press 3 Times", "3.circle"),
+    ("swipe", "Swipe", "hand.draw"),
+]
+
+struct ControlsPage: View {
     @ObservedObject var daemon: Daemon
+    let back: () -> Void
+    @State private var side = "left"
 
     var body: some View {
+        let s = daemon.state
+        let set = side == "left" ? s.gestures?.left : s.gestures?.right
+        let hold = s.hold ?? 0
+        VStack(alignment: .leading, spacing: 14) {
+            Button(action: back) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold))
+                    Text("Earbud Controls").font(.system(size: 14, weight: .semibold))
+                }
+            }
+            .buttonStyle(.plain)
+
+            Picker("", selection: $side) {
+                Text("Left").tag("left")
+                Text("Right").tag("right")
+            }
+            .pickerStyle(.segmented).labelsHidden()
+
+            Section(title: "Press and Hold Earbuds") {
+                VStack(spacing: 0) {
+                    ForEach(Array(gestureRows.enumerated()), id: \.element.id) { i, row in
+                        if i > 0 { Divider().padding(.leading, 12) }
+                        PickerRow(
+                            title: row.label,
+                            options: (row.id == "swipe" ? swipeChoices : pressChoices).map { ($0, actionLabels[$0] ?? $0) },
+                            selected: set?.action(row.id),
+                            enabled: s.connected && set != nil
+                        ) { daemon.setGesture(side: side, gesture: row.id, action: $0) }
+                    }
+                    Divider().padding(.leading, 12)
+                    HoldRow(mask: hold, enabled: s.connected && s.hold != nil) { daemon.setHold($0) }
+                }
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.5)))
+            }
+            Text("Settings are applied to the selected earbud. Press and Hold cycles through the chosen listening modes on both earbuds.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct HoldRow: View {
+    let mask: Int
+    let enabled: Bool
+    let onChange: (Int) -> Void
+    private let modes: [(Int, String)] = [(2, "Noise Cancellation"), (1, "Off"), (4, "Transparency")]
+
+    var body: some View {
+        let summary = modes.filter { mask & $0.0 != 0 }.map { $0.1 == "Noise Cancellation" ? "Noise Cancellation" : $0.1 }.joined(separator: ", ")
+        HStack {
+            Text("Press and Hold").font(.system(size: 13))
+            Spacer()
+            Menu {
+                ForEach(modes, id: \.0) { bit, label in
+                    let on = mask & bit != 0
+                    let count = modes.filter { mask & $0.0 != 0 }.count
+                    Toggle(label, isOn: Binding(get: { on }, set: { v in onChange(v ? mask | bit : mask & ~bit) }))
+                        .disabled(on && count <= 2)
+                }
+            } label: {
+                Text(summary.isEmpty ? "–" : summary).font(.system(size: 13)).lineLimit(1)
+            }
+            .menuStyle(.button).buttonStyle(.plain).foregroundStyle(.secondary).fixedSize()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .opacity(enabled ? 1 : 0.45).disabled(!enabled)
+    }
+}
+
+struct ToggleRow: View {
+    let title: String
+    let detail: String
+    let isOn: Bool
+    let enabled: Bool
+    let onChange: (Bool) -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13))
+                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(get: { isOn }, set: onChange)).toggleStyle(.switch).labelsHidden().controlSize(.small)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .opacity(enabled ? 1 : 0.45).disabled(!enabled)
+    }
+}
+
+struct Panel: View {
+    @ObservedObject var daemon: Daemon
+    @State private var showControls = false
+
+    var body: some View {
+        Group {
+            if showControls {
+                ControlsPage(daemon: daemon) { withAnimation(.snappy(duration: 0.2)) { showControls = false } }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else {
+                main.transition(.move(edge: .leading).combined(with: .opacity))
+            }
+        }
+        .padding(16)
+        .frame(width: 340)
+        .clipped()
+    }
+
+    @ViewBuilder var main: some View {
         let s = daemon.state
         let grp = group(of: s.mode)
         VStack(alignment: .leading, spacing: 14) {
@@ -301,6 +460,19 @@ struct Panel: View {
 
             VStack(spacing: 0) {
                 PickerRow(title: "Equalizer", options: eqOptions, selected: s.eq, enabled: s.connected) { daemon.setEq($0) }
+                Divider().padding(.leading, 12)
+                ToggleRow(title: "Game Mode", detail: "Reduces latency for games and video.", isOn: s.game ?? false, enabled: s.connected && s.game != nil) { daemon.setGame($0) }
+                Divider().padding(.leading, 12)
+                Button { withAnimation(.snappy(duration: 0.2)) { showControls = true } } label: {
+                    HStack {
+                        Text("Earbud Controls").font(.system(size: 13))
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.5)))
 
@@ -322,8 +494,6 @@ struct Panel: View {
                     .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
             }
         }
-        .padding(16)
-        .frame(width: 340)
     }
 }
 

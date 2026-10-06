@@ -115,6 +115,92 @@ impl Spatial {
     }
 }
 
+/// Switch id for game mode in the `0D 01` switch list and the `03 04` set command.
+pub const SWITCH_GAME: u8 = 0x28;
+
+pub const HOLD_OFF: u8 = 0x01;
+pub const HOLD_ANC: u8 = 0x02;
+pub const HOLD_TRANSPARENCY: u8 = 0x04;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Left = 1,
+    Right = 2,
+}
+
+impl Side {
+    pub const ALL: [Side; 2] = [Side::Left, Side::Right];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gesture {
+    Press = 1,
+    Double = 2,
+    Triple = 3,
+    Swipe = 5,
+}
+
+impl Gesture {
+    pub const ALL: [Gesture; 4] = [Gesture::Press, Gesture::Double, Gesture::Triple, Gesture::Swipe];
+
+    pub fn actions(self) -> &'static [Action] {
+        match self {
+            Gesture::Swipe => &[Action::None, Action::Volume, Action::SkipTrack],
+            _ => &[Action::None, Action::PlayPause, Action::Previous, Action::Next, Action::Voice, Action::GameMode],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    None = 0x00,
+    PlayPause = 0x01,
+    Voice = 0x03,
+    Previous = 0x05,
+    Next = 0x06,
+    Volume = 0x07,
+    SkipTrack = 0x0a,
+    GameMode = 0x11,
+}
+
+impl Action {
+    pub const ALL: [Action; 8] = [
+        Action::None,
+        Action::PlayPause,
+        Action::Voice,
+        Action::Previous,
+        Action::Next,
+        Action::Volume,
+        Action::SkipTrack,
+        Action::GameMode,
+    ];
+
+    pub fn from_id(id: u8) -> Option<Action> {
+        Self::ALL.into_iter().find(|a| *a as u8 == id)
+    }
+}
+
+/// Reply to the gesture read: `00 <n> (side mode gesture action)*`. Returns (side, gesture, action) bytes.
+pub fn parse_gestures(p: &[u8]) -> Vec<(u8, u8, u8)> {
+    let n = p.get(1).copied().unwrap_or(0) as usize;
+    p.get(2..).unwrap_or(&[]).chunks_exact(4).take(n).map(|c| (c[0], c[2], c[3])).collect()
+}
+
+/// Reply to the switch list read: `00 <n> (id value)*`.
+pub fn parse_switches(p: &[u8]) -> Vec<(u8, u8)> {
+    let n = p.get(1).copied().unwrap_or(0) as usize;
+    p.get(2..).unwrap_or(&[]).chunks_exact(2).take(n).map(|c| (c[0], c[1])).collect()
+}
+
+/// Lowercase Debug name, used as the wire name in the daemon JSON/commands.
+pub fn name_of<T: std::fmt::Debug>(v: T) -> String {
+    format!("{v:?}").to_lowercase()
+}
+
+pub fn by_name<T: std::fmt::Debug + Copy>(all: &[T], s: &str) -> Option<T> {
+    all.iter().copied().find(|v| name_of(v) == s.to_lowercase())
+}
+
 pub struct Builder {
     seq: u8,
 }
@@ -175,6 +261,30 @@ impl Builder {
         let mut t = vec![lo, hi, self.next_seq(), payload.len() as u8, 0];
         t.extend(payload);
         Self::wrap(&t)
+    }
+
+    pub fn gestures_query(&mut self) -> Vec<u8> {
+        self.raw(0x08, 0x01, &[0x02, 0x03, 0x01])
+    }
+
+    pub fn switches_query(&mut self) -> Vec<u8> {
+        self.raw(0x0D, 0x01, &[0x0C, 0x05, 0x04, 0x0B, 0x11, 0x13, 0x18, 0x06, 0x1B, 0x1D, 0x1C, 0x27, 0x28])
+    }
+
+    pub fn hold_query(&mut self) -> Vec<u8> {
+        self.raw(0x0C, 0x01, &[0x02, 0x01])
+    }
+
+    pub fn game_set(&mut self, on: bool) -> Vec<u8> {
+        self.raw(0x03, 0x04, &[SWITCH_GAME, on as u8])
+    }
+
+    pub fn gesture_set(&mut self, side: Side, gesture: Gesture, action: Action) -> Vec<u8> {
+        self.raw(0x01, 0x04, &[0x01, side as u8, 0x01, gesture as u8, action as u8])
+    }
+
+    pub fn hold_set(&mut self, mask: u8) -> Vec<u8> {
+        self.raw(0x04, 0x04, &[0x02, 0x01, mask])
     }
 
     pub fn eq_query(&mut self) -> Vec<u8> {
@@ -268,7 +378,7 @@ pub enum Event {
 pub fn decode(raw: &[u8]) -> Option<Event> {
     let f = parse(raw)?;
     match f.cmd {
-        CMD_NOISE_REPLY if f.payload.len() >= 5 => {
+        CMD_NOISE_REPLY if f.payload.len() >= 5 && f.payload[1] == 1 => {
             let w = u16::from_le_bytes([f.payload[3], f.payload[4]]);
             Some(Event::Noise(Mode::from_word(w), w))
         }
@@ -297,6 +407,18 @@ mod tests {
         assert_eq!(b.register(DEFAULT_TOKEN), h("aa0c0000008502050000b550a069"));
         assert_eq!(b.noise_query(), h("aa0900000c010302000101"));
         assert_eq!(b.battery_query(), h("aa0700000601040000"));
+    }
+
+    #[test]
+    fn parses_captured_gesture_and_switch_replies() {
+        let g = parse_gestures(&h("000c010101010101020601010305010104080101061201010507020101010201020602010305020104080201061202010507"));
+        assert_eq!(g.len(), 12);
+        assert_eq!(g[0], (1, 1, 1));
+        assert_eq!(g[1], (1, 2, 6));
+        assert_eq!(g[5], (1, 5, 7));
+        assert_eq!(g[6], (2, 1, 1));
+        let sw = parse_switches(&h("000a050104010b0011011301180006011d0027002801"));
+        assert_eq!(sw.iter().find(|(i, _)| *i == SWITCH_GAME), Some(&(0x28, 1)));
     }
 
     #[test]

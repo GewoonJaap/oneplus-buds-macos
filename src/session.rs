@@ -93,4 +93,56 @@ impl Session {
             _ => None,
         })
     }
+
+    pub fn query_gestures(&mut self) -> Result<Vec<(u8, u8, u8)>> {
+        let f = self.b.gestures_query();
+        self.link.send(&f)?;
+        self.wait_for(Duration::from_secs(5), |e| match e {
+            Event::Other(0x8108, p) => Some(parse_gestures(&p)),
+            _ => None,
+        })
+    }
+
+    pub fn query_game(&mut self) -> Result<Option<bool>> {
+        let f = self.b.switches_query();
+        self.link.send(&f)?;
+        self.wait_for(Duration::from_secs(5), |e| match e {
+            Event::Other(0x810D, p) => Some(parse_switches(&p).into_iter().find(|(i, _)| *i == SWITCH_GAME).map(|(_, v)| v != 0)),
+            _ => None,
+        })
+    }
+
+    pub fn query_hold(&mut self) -> Result<u8> {
+        let f = self.b.hold_query();
+        self.link.send(&f)?;
+        self.wait_for(Duration::from_secs(5), |e| match e {
+            Event::Other(0x810C, p) if p.len() >= 4 && p[1] == 2 => Some(p[3]),
+            _ => None,
+        })
+    }
+
+    pub fn set_game(&mut self, on: bool) -> Result<Option<bool>> {
+        let f = self.b.game_set(on);
+        self.link.send(&f)?;
+        std::thread::sleep(Duration::from_millis(400));
+        self.query_game()
+    }
+
+    pub fn set_gesture(&mut self, side: Side, gesture: Gesture, action: Action) -> Result<Vec<(u8, u8, u8)>> {
+        let f = self.b.gesture_set(side, gesture, action);
+        self.link.send(&f)?;
+        std::thread::sleep(Duration::from_millis(400));
+        self.query_gestures()
+    }
+
+    pub fn set_hold(&mut self, mask: u8) -> Result<u8> {
+        // The Android app sends this twice (once per earbud).
+        for _ in 0..2 {
+            let f = self.b.hold_set(mask);
+            self.link.send(&f)?;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_millis(500));
+        self.query_hold()
+    }
 }

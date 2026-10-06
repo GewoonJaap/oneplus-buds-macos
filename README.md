@@ -25,3 +25,8 @@ bash scripts/bundle.sh   # -> target/release/Buds.app (needs Rust and Xcode 26+)
 ```
 
 Protocol notes and status are in [PLAN.md](PLAN.md). Unofficial; not affiliated with OnePlus or Oppo.
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE): free to use, modify and share (pull requests welcome) for any
+noncommercial purpose; selling it or using it commercially is not allowed.
