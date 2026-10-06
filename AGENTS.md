@@ -83,6 +83,7 @@ Raw captures, probes and bug reports live in `capture/` and `probe/`. They conta
 - Design reference is the AirPods settings UI and the macOS Sound menu: four-way listening-mode picker with a draggable Liquid Glass thumb (`glassEffect` on macOS 26, flat fallback below), battery rings, list rows with checkmarks, subpages with a back chevron (Earbud Controls, Settings).
 - All user-visible strings go through `L("English key")` or a literal `Text("...")`, and must exist in every `Localizable.strings`.
 - Notifications use `UNUserNotificationCenter`; a delegate is required so banners show while the panel is open. If notifications are denied, the app opens the System Settings page. Debug log: `~/Library/Application Support/Buds/notif.log`.
+- Battery history: the Swift app appends a sample to `~/Library/Application Support/Buds/history.jsonl` when values change or every 5 minutes. The file is a rolling 7-day window, pruned on launch and hourly. The Statistics page (chart icon next to the gear) renders it with Swift Charts.
 - Settings are stored with `@AppStorage` (`notifyLow`, `lowThreshold`, `notifyConnection`, `menuBarBattery`).
 - WidgetKit desktop widget is not built: it needs an app extension and an App Group, which macOS usually will not load from an ad-hoc signed app. The daemon already writes `state.json` for a future widget.
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Charts
 import UserNotifications
 import ServiceManagement
 
@@ -81,8 +82,79 @@ enum Notifier {
     }
 }
 
+struct Sample: Codable, Identifiable, Equatable {
+    var t: Double
+    var l: Int?
+    var r: Int?
+    var c: Int?
+    var lc: Bool
+    var rc: Bool
+    var cc: Bool
+    var id: Double { t }
+
+    func level(_ side: String) -> (pct: Int, charging: Bool)? {
+        switch side {
+        case "left": return l.map { ($0, lc) }
+        case "right": return r.map { ($0, rc) }
+        default: return c.map { ($0, cc) }
+        }
+    }
+
+    func sameValues(_ o: Sample) -> Bool { l == o.l && r == o.r && c == o.c && lc == o.lc && rc == o.rc && cc == o.cc }
+}
+
+final class History: ObservableObject {
+    @Published var samples: [Sample] = []
+    private let url: URL
+    private let keep: TimeInterval = 7 * 24 * 3600
+
+    init() {
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Buds")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        url = dir.appendingPathComponent("history.jsonl")
+        if let text = try? String(contentsOf: url, encoding: .utf8) {
+            let dec = JSONDecoder()
+            samples = text.split(separator: "\n").compactMap { try? dec.decode(Sample.self, from: Data($0.utf8)) }
+        }
+        prune()
+    }
+
+    private var lastPrune = Date()
+
+    // Rolling window: drop everything older than `keep` and rewrite the file.
+    private func prune() {
+        lastPrune = Date()
+        let cutoff = Date().timeIntervalSince1970 - keep
+        guard let oldest = samples.first, oldest.t < cutoff else { return }
+        samples = samples.filter { $0.t >= cutoff }
+        let enc = JSONEncoder()
+        let text = samples.compactMap { try? enc.encode($0) }.compactMap { String(data: $0, encoding: .utf8) }.joined(separator: "\n")
+        try? (text + (text.isEmpty ? "" : "\n")).write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    func record(_ state: BudsState) {
+        guard state.connected, let b = state.battery, b.left != nil || b.right != nil || b.case != nil else { return }
+        if Date().timeIntervalSince(lastPrune) > 3600 { prune() }
+        let now = Date().timeIntervalSince1970
+        let s = Sample(t: now, l: b.left?.percent, r: b.right?.percent, c: b.case?.percent,
+                       lc: b.left?.charging ?? false, rc: b.right?.charging ?? false, cc: b.case?.charging ?? false)
+        if let last = samples.last, last.sameValues(s), now - last.t < 300 { return }
+        samples.append(s)
+        guard let data = try? JSONEncoder().encode(s), var line = String(data: data, encoding: .utf8) else { return }
+        line += "\n"
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(Data(line.utf8))
+            try? h.close()
+        } else {
+            try? line.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+}
+
 final class Daemon: ObservableObject {
-    @Published var state = BudsState() { didSet { evaluate(old: oldValue, new: state) } }
+    let history = History()
+    @Published var state = BudsState() { didSet { evaluate(old: oldValue, new: state); history.record(state) } }
     private var lowNotified = Set<String>()
     private var proc: Process?
     private var stdin: FileHandle?
@@ -562,14 +634,139 @@ struct SettingsPage: View {
     }
 }
 
+struct BatteryPoint: Identifiable {
+    let date: Date
+    let pct: Int
+    let charging: Bool
+    var id: Date { date }
+}
+
+struct ChargeSpan: Identifiable {
+    let start: Date
+    let end: Date
+    var id: Date { start }
+    var mid: Date { Date(timeIntervalSince1970: (start.timeIntervalSince1970 + end.timeIntervalSince1970) / 2) }
+}
+
+struct StatsPage: View {
+    @ObservedObject var history: History
+    let back: () -> Void
+    @AppStorage("lowThreshold") private var lowThreshold = 20
+    @State private var side = "left"
+    @State private var hours = 24
+
+    private let green = Color(red: 0.2, green: 0.86, blue: 0.38)
+    private let red = Color(red: 1.0, green: 0.27, blue: 0.23)
+
+    private func data() -> (points: [BatteryPoint], spans: [ChargeSpan], bucket: TimeInterval, from: Date, to: Date) {
+        let now = Date()
+        let from = now.addingTimeInterval(-Double(hours) * 3600)
+        let bucket = Double(hours) * 3600 / 96
+        var byBucket: [Int: BatteryPoint] = [:]
+        for s in history.samples where s.t >= from.timeIntervalSince1970 {
+            guard let l = s.level(side) else { continue }
+            byBucket[Int(s.t / bucket)] = BatteryPoint(date: Date(timeIntervalSince1970: s.t), pct: l.pct, charging: l.charging)
+        }
+        let points = byBucket.keys.sorted().compactMap { byBucket[$0] }
+        var spans: [ChargeSpan] = []
+        var start: Date?
+        var prev: Date?
+        for p in points {
+            if p.charging {
+                if start == nil { start = p.date }
+                prev = p.date
+            } else if let st = start, let pr = prev {
+                spans.append(ChargeSpan(start: st, end: pr.addingTimeInterval(bucket)))
+                start = nil
+            }
+        }
+        if let st = start, let pr = prev { spans.append(ChargeSpan(start: st, end: pr.addingTimeInterval(bucket))) }
+        return (points, spans, bucket, from, now)
+    }
+
+    var body: some View {
+        let d = data()
+        VStack(alignment: .leading, spacing: 14) {
+            Button(action: back) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold))
+                    Text("Statistics").font(.system(size: 14, weight: .semibold))
+                }
+            }
+            .buttonStyle(.plain)
+
+            Picker("", selection: $side) {
+                Text("Left").tag("left")
+                Text("Right").tag("right")
+                Text("Case").tag("case")
+            }
+            .pickerStyle(.segmented).labelsHidden()
+
+            Section(title: "Battery Level") {
+                if d.points.isEmpty {
+                    Text("No battery history yet. Keep the app running to record it.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 150, alignment: .center)
+                        .multilineTextAlignment(.center)
+                } else {
+                    Chart {
+                        ForEach(d.spans) { sp in
+                            RectangleMark(xStart: .value("From", sp.start), xEnd: .value("To", sp.end), yStart: .value("Min", -14), yEnd: .value("Max", 100))
+                                .foregroundStyle(green.opacity(0.16))
+                            RuleMark(xStart: .value("From", sp.start), xEnd: .value("To", sp.end), y: .value("Charging", -8))
+                                .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round))
+                                .foregroundStyle(green)
+                            PointMark(x: .value("Mid", sp.mid), y: .value("Charging", -8))
+                                .opacity(0)
+                                .annotation(position: .overlay) {
+                                    Image(systemName: "bolt.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(green)
+                                        .padding(1).background(Circle().fill(.background))
+                                }
+                        }
+                        ForEach(d.points) { p in
+                            BarMark(x: .value("Time", p.date), y: .value("Battery", p.pct), width: .fixed(hours == 24 ? 3 : 2))
+                                .foregroundStyle(!p.charging && p.pct <= lowThreshold ? red : green)
+                        }
+                    }
+                    .chartXScale(domain: d.from...d.to)
+                    .chartYScale(domain: -14...100)
+                    .chartYAxis {
+                        AxisMarks(position: .trailing, values: [0, 50, 100]) { v in
+                            AxisGridLine()
+                            AxisValueLabel { if let n = v.as(Int.self) { Text("\(n)%").font(.system(size: 10)) } }
+                        }
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                            AxisValueLabel(format: hours == 24 ? .dateTime.hour() : .dateTime.weekday(.abbreviated), anchor: .top)
+                        }
+                    }
+                    .frame(height: 170)
+                }
+            }
+
+            Picker("", selection: $hours) {
+                Text("24 h").tag(24)
+                Text("7 days").tag(168)
+            }
+            .pickerStyle(.segmented).labelsHidden()
+        }
+    }
+}
+
 struct Panel: View {
     @ObservedObject var daemon: Daemon
     @State private var showControls = false
     @State private var showSettings = false
+    @State private var showStats = false
 
     var body: some View {
         Group {
-            if showSettings {
+            if showStats {
+                StatsPage(history: daemon.history) { withAnimation(.snappy(duration: 0.2)) { showStats = false } }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else if showSettings {
                 SettingsPage { withAnimation(.snappy(duration: 0.2)) { showSettings = false } }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             } else if showControls {
@@ -654,6 +851,10 @@ struct Panel: View {
                     Image(systemName: "gearshape").font(.system(size: 14))
                 }
                 .buttonStyle(.plain).foregroundStyle(.secondary).help("Settings")
+                Button { withAnimation(.snappy(duration: 0.2)) { showStats = true } } label: {
+                    Image(systemName: "chart.bar").font(.system(size: 14))
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("Statistics").padding(.leading, 8)
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }
                     .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)

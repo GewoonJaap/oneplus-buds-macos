@@ -62,3 +62,8 @@
 "%@ battery low" = "Batterij van %@ bijna leeg";
 "%ld%% remaining" = "%ld%% resterend";
 "Notifications are working." = "Meldingen werken.";
+"Statistics" = "Statistieken";
+"Battery Level" = "Batterijniveau";
+"24 h" = "24 u";
+"7 days" = "7 dagen";
+"No battery history yet. Keep the app running to record it." = "Nog geen batterijgeschiedenis. Laat de app draaien om deze op te nemen.";
