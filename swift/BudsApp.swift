@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import UserNotifications
+import ServiceManagement
 
 // MARK: - State from the Rust daemon
 
@@ -32,8 +34,54 @@ struct BudsState: Codable, Equatable {
     var spatial: String?
 }
 
+final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = NotificationDelegate()
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
+    }
+}
+
+enum Notifier {
+    private static func log(_ m: String) {
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Buds/notif.log")
+        let line = "\(Date()) \(m)\n"
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
+        else { try? line.write(to: url, atomically: true, encoding: .utf8) }
+    }
+
+    static func requestAuth(then: (() -> Void)? = nil) {
+        let c = UNUserNotificationCenter.current()
+        c.delegate = NotificationDelegate.shared
+        c.getNotificationSettings { st in
+            log("settings status=\(st.authorizationStatus.rawValue)")
+            if st.authorizationStatus == .denied {
+                DispatchQueue.main.async {
+                    if let u = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { NSWorkspace.shared.open(u) }
+                }
+                return
+            }
+            c.requestAuthorization(options: [.alert, .sound]) { granted, err in
+                log("auth granted=\(granted) err=\(String(describing: err))")
+                if granted { then?() }
+            }
+        }
+    }
+
+    static func post(_ title: String, _ body: String) {
+        UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        let c = UNMutableNotificationContent()
+        c.title = title
+        c.body = body
+        c.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil)) { err in
+            log("post err=\(String(describing: err))")
+        }
+    }
+}
+
 final class Daemon: ObservableObject {
-    @Published var state = BudsState()
+    @Published var state = BudsState() { didSet { evaluate(old: oldValue, new: state) } }
+    private var lowNotified = Set<String>()
     private var proc: Process?
     private var stdin: FileHandle?
     private var buffer = Data()
@@ -63,6 +111,26 @@ final class Daemon: ObservableObject {
             let line = buffer.subdata(in: buffer.startIndex..<nl)
             buffer.removeSubrange(buffer.startIndex...nl)
             if let s = try? JSONDecoder().decode(BudsState.self, from: line) { state = s }
+        }
+    }
+
+    private func evaluate(old: BudsState, new: BudsState) {
+        let d = UserDefaults.standard
+        if d.bool(forKey: "notifyConnection"), old.connected != new.connected {
+            Notifier.post(new.connected ? "Buds connected" : "Buds disconnected", "OnePlus Buds Pro 3")
+        }
+        guard d.bool(forKey: "notifyLow") else { return }
+        let threshold = d.object(forKey: "lowThreshold") as? Int ?? 20
+        let cells: [(String, CellState?)] = [("Left earbud", new.battery?.left), ("Right earbud", new.battery?.right), ("Charging case", new.battery?.case)]
+        for (name, cell) in cells {
+            guard let c = cell else { continue }
+            if !c.charging && c.percent <= threshold {
+                if lowNotified.insert(name).inserted {
+                    Notifier.post("\(name) battery low", "\(c.percent)% remaining")
+                }
+            } else if c.charging || c.percent > threshold + 5 {
+                lowNotified.remove(name)
+            }
         }
     }
 
@@ -405,13 +473,75 @@ struct ToggleRow: View {
     }
 }
 
+struct SettingsPage: View {
+    let back: () -> Void
+    @AppStorage("notifyLow") private var notifyLow = false
+    @AppStorage("lowThreshold") private var threshold = 20
+    @AppStorage("notifyConnection") private var notifyConnection = false
+    @AppStorage("menuBarBattery") private var menuBarBattery = false
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Button(action: back) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold))
+                    Text("Settings").font(.system(size: 14, weight: .semibold))
+                }
+            }
+            .buttonStyle(.plain)
+
+            Section(title: "Notifications") {
+                VStack(spacing: 0) {
+                    ToggleRow(title: "Low Battery", detail: "Alert when an earbud or the case runs low.", isOn: notifyLow, enabled: true) { on in
+                        notifyLow = on
+                        if on { Notifier.requestAuth() }
+                    }
+                    Divider().padding(.leading, 12)
+                    PickerRow(title: "Alert At", options: [10, 15, 20, 30].map { ("\($0)", "\($0)%") }, selected: "\(threshold)", enabled: notifyLow) {
+                        threshold = Int($0) ?? 20
+                    }
+                    Divider().padding(.leading, 12)
+                    ToggleRow(title: "Connection", detail: "Alert when the buds connect or disconnect.", isOn: notifyConnection, enabled: true) { on in
+                        notifyConnection = on
+                        if on { Notifier.requestAuth() }
+                    }
+                }
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.5)))
+                Button("Send Test Notification") {
+                    Notifier.requestAuth { Notifier.post("Buds", "Notifications are working.") }
+                }
+                .controlSize(.small)
+            }
+
+            Section(title: "General") {
+                VStack(spacing: 0) {
+                    ToggleRow(title: "Launch at Login", detail: "Start Buds when you log in.", isOn: launchAtLogin, enabled: true) { on in
+                        do {
+                            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+                        } catch {}
+                        launchAtLogin = SMAppService.mainApp.status == .enabled
+                    }
+                    Divider().padding(.leading, 12)
+                    ToggleRow(title: "Battery in Menu Bar", detail: "Show left, right and case levels next to the icon.", isOn: menuBarBattery, enabled: true) { menuBarBattery = $0 }
+                }
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.5)))
+            }
+        }
+    }
+}
+
 struct Panel: View {
     @ObservedObject var daemon: Daemon
     @State private var showControls = false
+    @State private var showSettings = false
 
     var body: some View {
         Group {
-            if showControls {
+            if showSettings {
+                SettingsPage { withAnimation(.snappy(duration: 0.2)) { showSettings = false } }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else if showControls {
                 ControlsPage(daemon: daemon) { withAnimation(.snappy(duration: 0.2)) { showControls = false } }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             } else {
@@ -489,6 +619,10 @@ struct Panel: View {
             }
 
             HStack {
+                Button { withAnimation(.snappy(duration: 0.2)) { showSettings = true } } label: {
+                    Image(systemName: "gearshape").font(.system(size: 14))
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("Settings")
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }
                     .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
@@ -500,13 +634,21 @@ struct Panel: View {
 @main
 struct BudsApp: App {
     @StateObject private var daemon = Daemon()
+    @AppStorage("menuBarBattery") private var menuBarBattery = false
 
     var body: some Scene {
         MenuBarExtra {
             Panel(daemon: daemon)
         } label: {
-            Image(systemName: daemon.state.connected ? "earbuds" : "earbuds")
-                .opacity(daemon.state.connected ? 1 : 0.5)
+            HStack(spacing: 4) {
+                Image(systemName: "earbuds").opacity(daemon.state.connected ? 1 : 0.5)
+                if menuBarBattery, daemon.state.connected, let b = daemon.state.battery {
+                    let parts = [("L", b.left), ("R", b.right), ("C", b.case)].compactMap { label, cell in
+                        cell.map { "\(label) \($0.percent)%" }
+                    }
+                    if !parts.isEmpty { Text(parts.joined(separator: " ")) }
+                }
+            }
         }
         .menuBarExtraStyle(.window)
     }
