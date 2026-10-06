@@ -13,6 +13,7 @@ mkdir -p "$APP/Contents/Resources"
 xcrun actool assets/BudsIcon.icon --compile "$APP/Contents/Resources" --platform macosx \
   --minimum-deployment-target 14.0 --app-icon BudsIcon \
   --output-partial-info-plist "$(mktemp)" >/dev/null
+cp -R swift/Localizations/*.lproj "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -21,6 +22,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIdentifier</key><string>local.buds.menubar</string>
   <key>CFBundleIconFile</key><string>BudsIcon</string>
   <key>CFBundleIconName</key><string>BudsIcon</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key><array><string>en</string><string>nl</string></array>
   <key>CFBundleName</key><string>Buds</string>
   <key>CFBundleDisplayName</key><string>Buds</string>
   <key>CFBundleExecutable</key><string>buds-ui</string>

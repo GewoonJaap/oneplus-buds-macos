@@ -41,6 +41,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
+func L(_ key: String) -> String { NSLocalizedString(key, comment: "") }
+
 enum Notifier {
     private static func log(_ m: String) {
         let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Buds/notif.log")
@@ -117,7 +119,7 @@ final class Daemon: ObservableObject {
     private func evaluate(old: BudsState, new: BudsState) {
         let d = UserDefaults.standard
         if d.bool(forKey: "notifyConnection"), old.connected != new.connected {
-            Notifier.post(new.connected ? "Buds connected" : "Buds disconnected", "OnePlus Buds Pro 3")
+            Notifier.post(L(new.connected ? "Buds connected" : "Buds disconnected"), "OnePlus Buds Pro 3")
         }
         guard d.bool(forKey: "notifyLow") else { return }
         let threshold = d.object(forKey: "lowThreshold") as? Int ?? 20
@@ -126,7 +128,7 @@ final class Daemon: ObservableObject {
             guard let c = cell else { continue }
             if !c.charging && c.percent <= threshold {
                 if lowNotified.insert(name).inserted {
-                    Notifier.post("\(name) battery low", "\(c.percent)% remaining")
+                    Notifier.post(String(format: L("%@ battery low"), L(name)), String(format: L("%ld%% remaining"), c.percent))
                 }
             } else if c.charging || c.percent > threshold + 5 {
                 lowNotified.remove(name)
@@ -189,7 +191,7 @@ struct BatteryRing: View {
                 if cell?.charging == true { Image(systemName: "bolt.fill").font(.system(size: 9)).foregroundStyle(.green) }
                 Text(cell.map { "\($0.percent)%" } ?? "–").font(.system(size: 12, weight: .medium)).monospacedDigit()
             }
-            Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(L(title)).font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -257,7 +259,7 @@ struct SegmentedIcons: View {
                         let on = idx == shown
                         VStack(spacing: 5) {
                             Image(systemName: o.symbol).font(.system(size: 22)).frame(width: 34, height: 30, alignment: .center)
-                            Text(o.label)
+                            Text(L(o.label))
                                 .font(.system(size: 10.5, weight: .medium))
                                 .foregroundStyle(on ? Color.primary : Color.primary.opacity(0.75))
                                 .minimumScaleFactor(0.85)
@@ -298,7 +300,7 @@ struct Section<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased()).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            Text(L(title).uppercased()).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
             content
         }
     }
@@ -313,16 +315,16 @@ struct PickerRow: View {
 
     var body: some View {
         HStack {
-            Text(title).font(.system(size: 13))
+            Text(L(title)).font(.system(size: 13))
             Spacer()
             Menu {
                 ForEach(options, id: \.0) { id, label in
                     Button { onSelect(id) } label: {
-                        if id == selected { Label(label, systemImage: "checkmark") } else { Text(label) }
+                        if id == selected { Label(L(label), systemImage: "checkmark") } else { Text(L(label)) }
                     }
                 }
             } label: {
-                Text(options.first { $0.0 == selected }?.1 ?? "–").font(.system(size: 13))
+                Text(options.first { $0.0 == selected }.map { L($0.1) } ?? "–").font(.system(size: 13))
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
@@ -351,7 +353,7 @@ struct SpatialRow: View {
                 Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold))
                     .frame(width: 16).opacity(selected ? 1 : 0)
                 Image(systemName: symbol).font(.system(size: 15)).frame(width: 26)
-                Text(label).font(.system(size: 13, weight: selected ? .medium : .regular))
+                Text(L(label)).font(.system(size: 13, weight: selected ? .medium : .regular))
                 Spacer()
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
@@ -418,8 +420,9 @@ struct ControlsPage: View {
                 }
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.5)))
             }
-            Text("Settings are applied to the selected earbud. Press and Hold cycles through the chosen listening modes on both earbuds.")
+            Text("Applies to the selected earbud. Press and Hold cycles listening modes on both.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -431,7 +434,7 @@ struct HoldRow: View {
     private let modes: [(Int, String)] = [(2, "Noise Cancellation"), (1, "Off"), (4, "Transparency")]
 
     var body: some View {
-        let summary = modes.filter { mask & $0.0 != 0 }.map { $0.1 == "Noise Cancellation" ? "Noise Cancellation" : $0.1 }.joined(separator: ", ")
+        let summary = modes.filter { mask & $0.0 != 0 }.map { L($0.1) }.joined(separator: ", ")
         HStack {
             Text("Press and Hold").font(.system(size: 13))
             Spacer()
@@ -439,7 +442,7 @@ struct HoldRow: View {
                 ForEach(modes, id: \.0) { bit, label in
                     let on = mask & bit != 0
                     let count = modes.filter { mask & $0.0 != 0 }.count
-                    Toggle(label, isOn: Binding(get: { on }, set: { v in onChange(v ? mask | bit : mask & ~bit) }))
+                    Toggle(L(label), isOn: Binding(get: { on }, set: { v in onChange(v ? mask | bit : mask & ~bit) }))
                         .disabled(on && count <= 2)
                 }
             } label: {
@@ -462,8 +465,8 @@ struct ToggleRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13))
-                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(L(title)).font(.system(size: 13))
+                Text(L(detail)).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             Toggle("", isOn: Binding(get: { isOn }, set: onChange)).toggleStyle(.switch).labelsHidden().controlSize(.small)
@@ -509,7 +512,7 @@ struct SettingsPage: View {
                 }
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.5)))
                 Button("Send Test Notification") {
-                    Notifier.requestAuth { Notifier.post("Buds", "Notifications are working.") }
+                    Notifier.requestAuth { Notifier.post("Buds", L("Notifications are working.")) }
                 }
                 .controlSize(.small)
             }
@@ -561,7 +564,7 @@ struct Panel: View {
                 Image(systemName: "earbuds").font(.system(size: 20))
                 VStack(alignment: .leading, spacing: 1) {
                     Text("OnePlus Buds Pro 3").font(.system(size: 14, weight: .semibold))
-                    Text(s.connected ? "Connected" : "Not connected")
+                    Text(L(s.connected ? "Connected" : "Not connected"))
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
