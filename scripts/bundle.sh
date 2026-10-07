@@ -24,12 +24,13 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIconName</key><string>BudsIcon</string>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleLocalizations</key><array><string>en</string><string>nl</string></array>
+  <key>BudsDevBuild</key><__DEVBUILD__/>
   <key>CFBundleName</key><string>Buds</string>
   <key>CFBundleDisplayName</key><string>Buds</string>
   <key>CFBundleExecutable</key><string>buds-ui</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>1</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>__VERSION__</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
@@ -37,6 +38,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+DEV=true; [ "${RELEASE:-0}" = "1" ] && DEV=false
+sed -i.bak -e "s/__VERSION__/${VERSION:-0.1.0}/g" -e "s/__DEVBUILD__/${DEV}/" "$APP/Contents/Info.plist" && rm "$APP/Contents/Info.plist.bak"
 plutil -lint "$APP/Contents/Info.plist"
 codesign --force --deep -s - "$APP"
 codesign -v "$APP"

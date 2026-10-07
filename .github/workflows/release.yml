@@ -36,7 +36,7 @@ jobs:
 
       - name: Build app bundle
         run: |
-          bash scripts/bundle.sh
+          RELEASE=1 VERSION=${{ steps.v.outputs.version }} bash scripts/bundle.sh
           cd target/release
           ditto -c -k --keepParent Buds.app "Buds-${{ steps.v.outputs.version }}-macos.zip"
 

@@ -81,12 +81,17 @@ Raw captures, probes and bug reports live in `capture/` and `probe/`. They conta
 ## UI conventions
 
 - Design reference is the AirPods settings UI and the macOS Sound menu: four-way listening-mode picker with a draggable Liquid Glass thumb (`glassEffect` on macOS 26, flat fallback below), battery rings, list rows with checkmarks, subpages with a back chevron (Earbud Controls, Settings).
+- Text must always be allowed to wrap (more languages are planned): the panel root applies `.fixedSize(horizontal: false, vertical: true)` so no height is proposed to children. Do not add `.lineLimit(1)`, fixed heights on text, or `.fixedSize()` that forces a single line.
 - All user-visible strings go through `L("English key")` or a literal `Text("...")`, and must exist in every `Localizable.strings`.
 - Notifications use `UNUserNotificationCenter`; a delegate is required so banners show while the panel is open. If notifications are denied, the app opens the System Settings page. Debug log: `~/Library/Application Support/Buds/notif.log`.
 - Battery history: the Swift app appends a sample to `~/Library/Application Support/Buds/history.jsonl` when values change or every 5 minutes. The file is a rolling 7-day window, pruned on launch and hourly. The Statistics page (chart icon next to the gear) renders it with Swift Charts.
 - Settings are stored with `@AppStorage` (`notifyLow`, `lowThreshold`, `notifyConnection`, `menuBarBattery`).
 - WidgetKit desktop widget is not built: it needs an app extension and an App Group, which macOS usually will not load from an ad-hoc signed app. The daemon already writes `state.json` for a future widget.
 
-## Release
+## Release and auto-update
+
+Repo: https://github.com/GewoonJaap/oneplus-buds-macos. `scripts/bundle.sh` takes `VERSION=<x.y.z>` and `RELEASE=1` (CI passes both); local builds are `0.1.0`.
+The app's `Updater` polls `releases/latest` on launch and every 6 hours, compares the tag with `CFBundleShortVersionString`, and (if auto-install is on) downloads the `.zip` asset with `URLSession` (so no quarantine flag), unzips with `ditto`, checks the bundle id, then a detached `sh` script waits for the app to quit, swaps the `.app` and reopens it. Dev builds (Info.plist key `BudsDevBuild` is true, which is the default; CI sets `RELEASE=1` so `scripts/bundle.sh` writes false) never check automatically and never self-replace; only the manual "Check Now" button works there. Settings: `autoCheckUpdates`, `autoInstallUpdates`.
+Caveat: the app is ad-hoc signed, so each update has a new code identity and macOS may ask for Bluetooth and notification permission again.
 
 Merging to `main` publishes a release. The app is ad-hoc signed, so users must run `xattr -dr com.apple.quarantine /Applications/Buds.app` once. Real signing and notarization need an Apple developer account.

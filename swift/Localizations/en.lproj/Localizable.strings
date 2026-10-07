@@ -71,3 +71,17 @@
 "Estimated Battery Life" = "Estimated Battery Life";
 "Time Charging" = "Time Charging";
 "Average Level" = "Average Level";
+"Updates" = "Updates";
+"Check for Updates Automatically" = "Check for Updates Automatically";
+"Looks for new releases on GitHub." = "Looks for new releases on GitHub.";
+"Install Updates Automatically" = "Install Updates Automatically";
+"Downloads and restarts the app when a new version is found." = "Downloads and restarts the app when a new version is found.";
+"Check Now" = "Check Now";
+"Version" = "Version";
+"Checking…" = "Checking…";
+"You're up to date" = "You're up to date";
+"Update available" = "Update available";
+"Update" = "Update";
+"Downloading update…" = "Downloading update…";
+"Installing update…" = "Installing update…";
+"Update failed" = "Update failed";

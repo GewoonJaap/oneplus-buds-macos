@@ -71,3 +71,17 @@
 "Estimated Battery Life" = "Geschatte gebruiksduur";
 "Time Charging" = "Oplaadtijd";
 "Average Level" = "Gemiddeld niveau";
+"Updates" = "Updates";
+"Check for Updates Automatically" = "Automatisch controleren op updates";
+"Looks for new releases on GitHub." = "Zoekt naar nieuwe versies op GitHub.";
+"Install Updates Automatically" = "Updates automatisch installeren";
+"Downloads and restarts the app when a new version is found." = "Downloadt en herstart de app zodra er een nieuwe versie is.";
+"Check Now" = "Nu controleren";
+"Version" = "Versie";
+"Checking…" = "Controleren…";
+"You're up to date" = "Je hebt de nieuwste versie";
+"Update available" = "Update beschikbaar";
+"Update" = "Update";
+"Downloading update…" = "Update downloaden…";
+"Installing update…" = "Update installeren…";
+"Update failed" = "Update mislukt";

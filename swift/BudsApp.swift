@@ -42,6 +42,131 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
+struct ReleaseInfo: Equatable {
+    let version: String
+    let url: URL
+}
+
+final class Updater: ObservableObject {
+    static let repo = "GewoonJaap/oneplus-buds-macos"
+    static let releasesPage = URL(string: "https://github.com/GewoonJaap/oneplus-buds-macos/releases/latest")!
+
+    @Published var available: ReleaseInfo?
+    @Published var status = ""
+    @Published var busy = false
+
+    let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+    private var timer: Timer?
+
+    private var isDevBuild: Bool { Bundle.main.infoDictionary?["BudsDevBuild"] as? Bool ?? true }
+
+    init() {
+        UserDefaults.standard.register(defaults: ["autoCheckUpdates": true, "autoInstallUpdates": true])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in self?.checkIfEnabled() }
+        timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in self?.checkIfEnabled() }
+    }
+
+    private func checkIfEnabled() {
+        if !isDevBuild, UserDefaults.standard.bool(forKey: "autoCheckUpdates") { check(manual: false) }
+    }
+
+    private static func parts(_ v: String) -> [Int] {
+        v.trimmingCharacters(in: CharacterSet(charactersIn: "vV")).split(separator: ".").map { Int($0) ?? 0 }
+    }
+
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        let (x, y) = (parts(a), parts(b))
+        for i in 0..<max(x.count, y.count) {
+            let (p, q) = (i < x.count ? x[i] : 0, i < y.count ? y[i] : 0)
+            if p != q { return p > q }
+        }
+        return false
+    }
+
+    func check(manual: Bool) {
+        guard !busy else { return }
+        if manual { status = "Checking…" }
+        var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(Updater.repo)/releases/latest")!)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.timeoutInterval = 20
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let tag = obj["tag_name"] as? String else {
+                    if manual { self.status = "Update failed" }
+                    return
+                }
+                let assets = obj["assets"] as? [[String: Any]] ?? []
+                let zip = assets.compactMap { $0["browser_download_url"] as? String }.first { $0.hasSuffix(".zip") }
+                guard Updater.isNewer(tag, than: self.current), let zip, let url = URL(string: zip) else {
+                    self.available = nil
+                    if manual { self.status = "You're up to date" }
+                    return
+                }
+                self.available = ReleaseInfo(version: tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV")), url: url)
+                self.status = ""
+                if UserDefaults.standard.bool(forKey: "autoInstallUpdates"), !self.isDevBuild { self.install() }
+            }
+        }.resume()
+    }
+
+    func install() {
+        guard let release = available, !busy else { return }
+        if isDevBuild { NSWorkspace.shared.open(Updater.releasesPage); return }
+        let dest = Bundle.main.bundleURL
+        guard FileManager.default.isWritableFile(atPath: dest.deletingLastPathComponent().path) else {
+            NSWorkspace.shared.open(Updater.releasesPage)
+            return
+        }
+        busy = true
+        status = "Downloading update…"
+        URLSession.shared.downloadTask(with: release.url) { [weak self] tmp, _, _ in
+            guard let self else { return }
+            let work = FileManager.default.temporaryDirectory.appendingPathComponent("buds-update-\(UUID().uuidString)")
+            let zip = work.appendingPathComponent("update.zip")
+            var ok = false
+            if let tmp {
+                try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+                try? FileManager.default.moveItem(at: tmp, to: zip)
+                DispatchQueue.main.async { self.status = "Installing update…" }
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                p.arguments = ["-x", "-k", zip.path, work.path]
+                try? p.run()
+                p.waitUntilExit()
+                let newApp = work.appendingPathComponent("Buds.app")
+                let plist = newApp.appendingPathComponent("Contents/Info.plist")
+                let id = (NSDictionary(contentsOf: plist)?["CFBundleIdentifier"] as? String)
+                ok = p.terminationStatus == 0 && id == Bundle.main.bundleIdentifier
+                if ok {
+                    let script = """
+                    while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done
+                    rm -rf "\(dest.path)"
+                    mv "\(newApp.path)" "\(dest.path)"
+                    rm -rf "\(work.path)"
+                    open "\(dest.path)"
+                    """
+                    let sh = Process()
+                    sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+                    sh.arguments = ["-c", script]
+                    sh.standardOutput = FileHandle.nullDevice
+                    sh.standardError = FileHandle.nullDevice
+                    ok = (try? sh.run()) != nil
+                }
+            }
+            DispatchQueue.main.async {
+                if ok {
+                    NSApplication.shared.terminate(nil)
+                } else {
+                    self.busy = false
+                    self.status = "Update failed"
+                }
+            }
+        }.resume()
+    }
+}
+
 func L(_ key: String) -> String { NSLocalizedString(key, comment: "") }
 
 enum Notifier {
@@ -364,8 +489,7 @@ struct SegmentedIcons: View {
                                 .foregroundStyle(on ? Color.primary : Color.primary.opacity(0.75))
                                 .minimumScaleFactor(0.85)
                                 .multilineTextAlignment(.center)
-                                .lineLimit(2)
-                                .frame(height: 28, alignment: .top)
+                                .frame(minHeight: 28, alignment: .top)
                         }
                         .padding(.vertical, 8)
                         .frame(width: segW, height: geo.size.height - pad * 2)
@@ -429,7 +553,7 @@ struct PickerRow: View {
             .menuStyle(.button)
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .fixedSize()
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
         .opacity(enabled ? 1 : 0.45).disabled(!enabled)
@@ -546,9 +670,9 @@ struct HoldRow: View {
                         .disabled(on && count <= 2)
                 }
             } label: {
-                Text(summary.isEmpty ? "–" : summary).font(.system(size: 13)).lineLimit(1)
+                Text(summary.isEmpty ? "–" : summary).font(.system(size: 13)).multilineTextAlignment(.trailing)
             }
-            .menuStyle(.button).buttonStyle(.plain).foregroundStyle(.secondary).fixedSize()
+            .menuStyle(.button).buttonStyle(.plain).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
         .opacity(enabled ? 1 : 0.45).disabled(!enabled)
@@ -565,10 +689,11 @@ struct ToggleRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(L(title)).font(.system(size: 13))
+                Text(L(title)).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
                 Text(L(detail)).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
+            .layoutPriority(1)
+            Spacer(minLength: 8)
             Toggle("", isOn: Binding(get: { isOn }, set: onChange)).toggleStyle(.switch).labelsHidden().controlSize(.small)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
@@ -577,7 +702,10 @@ struct ToggleRow: View {
 }
 
 struct SettingsPage: View {
+    @ObservedObject var updater: Updater
     let back: () -> Void
+    @AppStorage("autoCheckUpdates") private var autoCheck = true
+    @AppStorage("autoInstallUpdates") private var autoInstall = true
     @AppStorage("notifyLow") private var notifyLow = false
     @AppStorage("lowThreshold") private var threshold = 20
     @AppStorage("notifyConnection") private var notifyConnection = false
@@ -615,6 +743,30 @@ struct SettingsPage: View {
                     Notifier.requestAuth { Notifier.post("Buds", L("Notifications are working.")) }
                 }
                 .controlSize(.small)
+            }
+
+            Section(title: "Updates") {
+                VStack(spacing: 0) {
+                    ToggleRow(title: "Check for Updates Automatically", detail: "Looks for new releases on GitHub.", isOn: autoCheck, enabled: true) { autoCheck = $0 }
+                    Divider().padding(.leading, 12)
+                    ToggleRow(title: "Install Updates Automatically", detail: "Downloads and restarts the app when a new version is found.", isOn: autoInstall, enabled: autoCheck) { autoInstall = $0 }
+                    Divider().padding(.leading, 12)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(L("Version")) \(updater.current)").font(.system(size: 13))
+                            if !updater.status.isEmpty {
+                                Text(L(updater.status)).font(.system(size: 11)).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button(updater.available != nil ? "Update" : "Check Now") {
+                            if updater.available != nil { updater.install() } else { updater.check(manual: true) }
+                        }
+                        .controlSize(.small).disabled(updater.busy)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                }
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.5)))
             }
 
             Section(title: "General") {
@@ -817,6 +969,7 @@ struct StatsPage: View {
 
 struct Panel: View {
     @ObservedObject var daemon: Daemon
+    @ObservedObject var updater: Updater
     @State private var showControls = false
     @State private var showSettings = false
     @State private var showStats = false
@@ -827,7 +980,7 @@ struct Panel: View {
                 StatsPage(history: daemon.history) { withAnimation(.snappy(duration: 0.2)) { showStats = false } }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             } else if showSettings {
-                SettingsPage { withAnimation(.snappy(duration: 0.2)) { showSettings = false } }
+                SettingsPage(updater: updater) { withAnimation(.snappy(duration: 0.2)) { showSettings = false } }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             } else if showControls {
                 ControlsPage(daemon: daemon) { withAnimation(.snappy(duration: 0.2)) { showControls = false } }
@@ -836,6 +989,8 @@ struct Panel: View {
                 main.transition(.move(edge: .leading).combined(with: .opacity))
             }
         }
+        // Propose no height to the whole tree so any Text may wrap instead of truncating.
+        .fixedSize(horizontal: false, vertical: true)
         .padding(16)
         .frame(width: 340)
         .clipped()
@@ -845,6 +1000,19 @@ struct Panel: View {
         let s = daemon.state
         let grp = group(of: s.mode)
         VStack(alignment: .leading, spacing: 14) {
+            if let r = updater.available {
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.down.circle.fill").font(.system(size: 18)).foregroundStyle(.tint)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Update available").font(.system(size: 13, weight: .semibold))
+                        Text(updater.status.isEmpty ? "v\(r.version)" : L(updater.status)).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Update") { updater.install() }.controlSize(.small).disabled(updater.busy)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.5)))
+            }
             HStack(spacing: 10) {
                 Image(systemName: "earbuds").font(.system(size: 20))
                 VStack(alignment: .leading, spacing: 1) {
@@ -926,11 +1094,12 @@ struct Panel: View {
 @main
 struct BudsApp: App {
     @StateObject private var daemon = Daemon()
+    @StateObject private var updater = Updater()
     @AppStorage("menuBarBattery") private var menuBarBattery = false
 
     var body: some Scene {
         MenuBarExtra {
-            Panel(daemon: daemon)
+            Panel(daemon: daemon, updater: updater)
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "earbuds").opacity(daemon.state.connected ? 1 : 0.5)
