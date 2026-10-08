@@ -12,6 +12,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_updater::UpdaterExt;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -87,6 +88,27 @@ fn autostart_set(app: AppHandle, enabled: bool) {
     let _ = if enabled { al.enable() } else { al.disable() };
 }
 
+/// Returns the newer version string, or None when up to date.
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
+    let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    Ok(update.map(|u| u.version))
+}
+
+/// Download, verify (signature) and install the update, then relaunch.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    let Some(update) = update else { return Ok(()) };
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    app.restart()
+}
+
+#[tauri::command]
+fn app_info(app: AppHandle) -> (String, bool) {
+    (app.package_info().version.to_string(), cfg!(debug_assertions))
+}
+
 #[tauri::command]
 fn quit(app: AppHandle) {
     app.exit(0);
@@ -124,8 +146,9 @@ pub fn run() {
         .manage(Backend::default())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show_flyout(app, None)))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
-        .invoke_handler(tauri::generate_handler![send_cmd, get_state, notify, autostart_get, autostart_set, quit])
+        .invoke_handler(tauri::generate_handler![send_cmd, get_state, notify, autostart_get, autostart_set, quit, check_update, install_update, app_info])
         .setup(|app| {
             let handle = app.handle().clone();
             if let Err(e) = spawn_daemon(&handle) {

@@ -15,7 +15,7 @@ const EQS = [["balanced", "Balanced"], ["bold", "Bold"], ["serenade", "Serenade"
 const SPATIAL = [["off", "Off"], ["fixed", "Fixed"], ["headtracked", "Head tracked"]];
 
 const prefs = Object.assign(
-  { notifyLow: true, threshold: 20, notifyConn: false },
+  { notifyLow: true, threshold: 20, notifyConn: false, autoCheck: true, autoInstall: false },
   safeParse(localStorage.getItem("prefs")),
 );
 function safeParse(s) { try { return JSON.parse(s) || {}; } catch { return {}; } }
@@ -122,3 +122,51 @@ invoke("autostart_get").then((v) => ($("autostart").checked = v));
 
 listen("state", (e) => onState(e.payload));
 invoke("get_state").then((l) => { if (l) onState(l); else render(); });
+
+// --- Updates (Tauri updater plugin: signed release assets, see .github/workflows/release.yml) ---
+let isDev = false;
+let pending = null;
+
+async function checkUpdate(manual) {
+  const st = $("update-status");
+  if (manual) st.textContent = "Checking…";
+  try {
+    pending = await invoke("check_update");
+  } catch (e) {
+    if (manual) st.textContent = "Could not check for updates.";
+    return;
+  }
+  const banner = $("update-banner");
+  if (!pending) {
+    banner.hidden = true;
+    if (manual) st.textContent = "You're up to date.";
+    return;
+  }
+  if (prefs.autoInstall && !isDev && !manual) return installUpdate();
+  st.textContent = `Version ${pending} is available.`;
+  banner.textContent = `Update to ${pending}`;
+  banner.hidden = false;
+}
+
+async function installUpdate() {
+  $("update-banner").textContent = "Installing update…";
+  $("update-banner").hidden = false;
+  try { await invoke("install_update"); } catch (e) { $("update-status").textContent = "Update failed."; }
+}
+
+$("update-banner").onclick = installUpdate;
+$("check-now").onclick = () => checkUpdate(true);
+$("auto-check").onchange = (e) => { prefs.autoCheck = e.target.checked; savePrefs(); };
+$("auto-install").onchange = (e) => { prefs.autoInstall = e.target.checked; savePrefs(); };
+$("auto-check").checked = prefs.autoCheck;
+$("auto-install").checked = prefs.autoInstall;
+
+invoke("app_info").then(([version, dev]) => {
+  isDev = dev;
+  $("version").textContent = version;
+  // Dev builds never check automatically (same as the macOS app); "Check now" still works.
+  if (prefs.autoCheck && !dev) {
+    setTimeout(() => checkUpdate(false), 5000);
+    setInterval(() => prefs.autoCheck && checkUpdate(false), 6 * 3600 * 1000);
+  }
+});
