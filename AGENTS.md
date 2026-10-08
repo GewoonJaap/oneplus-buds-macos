@@ -28,6 +28,13 @@ pkill buds-ui; pkill buds-daemon; open target/release/Buds.app
 
 Needs Rust and Xcode 26+ (the UI uses the macOS 26 Liquid Glass API behind `#available`; minimum macOS 14).
 
+## Windows
+
+- `src/win.rs`: WinRT transport. The buds are paired as a classic device and expose no GATT to Windows, so it connects over RFCOMM (service UUID `0000079A-D102-11E1-9B23-00025B00A5A5`, same frames) and keeps GATT as a fallback. `buds discover` lists paired devices and their services. The buds must be connected to the PC (not only paired).
+- `windows/`: Tauri 2 tray app, a thin client of `buds-daemon` (spawns it, forwards command lines, relays JSON state). UI is static files in `windows/ui` (no bundler). Data dir is `%LOCALAPPDATA%\Buds` (`src/paths.rs`).
+- Dev build: `cargo build --bin buds-daemon`, copy `target/debug/buds-daemon.exe` to `windows/src-tauri/binaries/buds-daemon-x86_64-pc-windows-msvc.exe`, then `cd windows && npx tauri build --debug --no-bundle` -> `windows/src-tauri/target/debug/buds-tray.exe`.
+- Notification rules and battery history still live in the UI layer; the plan is to move them into the daemon.
+
 ## Hardware and sandbox rules
 
 - The agent sandbox has no Bluetooth. Anything that talks to the buds must run in the user's own terminal (`run_in_terminal`) or be tested by the user. Do not claim a Bluetooth feature works from unit tests alone.

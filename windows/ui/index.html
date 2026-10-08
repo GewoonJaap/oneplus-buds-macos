@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buds</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="main" class="page">
+  <header>
+    <div>
+      <h1>OnePlus Buds Pro 3</h1>
+      <p id="status" class="muted">Connecting…</p>
+    </div>
+    <div class="actions">
+      <button id="reconnect" class="ghost" hidden>Reconnect</button>
+      <button id="open-settings" class="icon" title="Settings" aria-label="Settings">⚙</button>
+    </div>
+  </header>
+
+  <section class="batteries" id="batteries"></section>
+
+  <section>
+    <h2>Listening mode</h2>
+    <div class="segmented" id="modes"></div>
+    <div class="segmented small" id="nc-levels" hidden></div>
+  </section>
+
+  <section>
+    <h2>Equalizer</h2>
+    <select id="eq"></select>
+  </section>
+
+  <section class="row">
+    <span>Game mode</span>
+    <label class="switch"><input type="checkbox" id="game"><span></span></label>
+  </section>
+
+  <section>
+    <h2>Spatial audio</h2>
+    <div class="list" id="spatial"></div>
+  </section>
+</main>
+
+<main id="settings" class="page" hidden>
+  <header>
+    <button id="back" class="icon" aria-label="Back">‹</button>
+    <h1>Settings</h1>
+    <span></span>
+  </header>
+
+  <section>
+    <h2>General</h2>
+    <div class="row"><span>Launch at login</span>
+      <label class="switch"><input type="checkbox" id="autostart"><span></span></label></div>
+  </section>
+
+  <section>
+    <h2>Notifications</h2>
+    <div class="row"><span>Low battery</span>
+      <label class="switch"><input type="checkbox" id="notify-low"><span></span></label></div>
+    <div class="row"><span>Alert at <b id="threshold-val">20</b>%</span>
+      <input type="range" id="threshold" min="5" max="50" step="5"></div>
+    <div class="row"><span>Connected / disconnected</span>
+      <label class="switch"><input type="checkbox" id="notify-conn"><span></span></label></div>
+    <button id="test-notify" class="ghost">Send test notification</button>
+  </section>
+
+  <section>
+    <button id="quit" class="ghost danger">Quit Buds</button>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

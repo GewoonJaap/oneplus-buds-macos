@@ -88,8 +88,7 @@ fn publish(s: &State, last: &mut String) {
     *last = j.clone();
     println!("{j}");
     let _ = std::io::stdout().flush();
-    if let Some(home) = std::env::var_os("HOME") {
-        let dir = std::path::Path::new(&home).join("Library/Application Support/Buds");
+    if let Some(dir) = buds::paths::data_dir() {
         let _ = std::fs::create_dir_all(&dir);
         let tmp = dir.join("state.json.tmp");
         if std::fs::write(&tmp, &j).is_ok() {
