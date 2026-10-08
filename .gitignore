@@ -19,3 +19,10 @@ probe/
 .env
 *.log
 *.btsnoop
+
+# Windows (Tauri) app
+windows/node_modules/
+windows/src-tauri/target/
+windows/src-tauri/gen/
+windows/src-tauri/binaries/
+windows/app-icon.png

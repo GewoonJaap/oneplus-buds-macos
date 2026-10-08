@@ -49,3 +49,66 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "Buds ${{ steps.v.outputs.version }}" \
             --generate-notes
+
+  windows:
+    # Runs after the macOS job so the release (and its tag) already exist.
+    needs: build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            windows/src-tauri
+
+      - name: Test
+        run: cargo test --lib
+
+      - name: Compute version
+        id: v
+        run: |
+          base=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=${base%.*}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Check Windows translations are up to date
+        run: |
+          python scripts/gen-win-i18n.py
+          git diff --exit-code windows/ui/i18n
+
+      - name: Build daemon sidecar
+        run: |
+          cargo build --release --bin buds-daemon
+          mkdir -p windows/src-tauri/binaries
+          cp target/release/buds-daemon.exe windows/src-tauri/binaries/buds-daemon-x86_64-pc-windows-msvc.exe
+
+      - name: Build installer
+        working-directory: windows
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npm ci
+          npx tauri build --config '{"version":"${{ steps.v.outputs.version }}"}'
+
+      - name: Publish Windows assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v='${{ steps.v.outputs.version }}'
+          dir=windows/src-tauri/target/release/bundle/nsis
+          exe=$(ls "$dir"/*-setup.exe)
+          name="Buds-$v-windows-x64-setup.exe"
+          cp "$exe" "$name"
+          cp "$exe.sig" "$name.sig"
+          printf '{"version":"%s","notes":"","pub_date":"%s","platforms":{"windows-x86_64":{"signature":"%s","url":"https://github.com/%s/releases/download/v%s/%s"}}}' \
+            "$v" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(cat "$name.sig")" "$GITHUB_REPOSITORY" "$v" "$name" > latest.json
+          gh release upload "v$v" "$name" "$name.sig" latest.json --clobber

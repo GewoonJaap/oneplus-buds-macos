@@ -25,9 +25,13 @@ pub fn connect(timeout: Duration) -> Result<Link> {
     {
         crate::cb::connect(timeout)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        crate::win::connect(timeout)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = timeout;
-        anyhow::bail!("only supported on macOS")
+        anyhow::bail!("only supported on macOS and Windows")
     }
 }

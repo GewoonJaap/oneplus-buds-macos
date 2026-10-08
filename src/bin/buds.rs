@@ -34,6 +34,8 @@ enum Cmd {
     Gesture { side: String, gesture: String, action: String },
     /// Hold-gesture noise cycle: hold [off,anc,transparency comma list]
     Hold { modes: Option<String> },
+    /// Windows only: list paired devices with their RFCOMM and GATT services
+    Discover,
     Listen { #[arg(default_value_t = 30)] seconds: u64 },
 }
 
@@ -43,6 +45,12 @@ fn parse_mode(s: &str) -> Option<Mode> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Cmd::Discover = cli.cmd {
+        #[cfg(windows)]
+        return buds::win::discover();
+        #[cfg(not(windows))]
+        anyhow::bail!("discover is only available on Windows");
+    }
     let mut s = Session::open()?;
     match cli.cmd {
         Cmd::Status => match s.query_mode()? {
@@ -177,6 +185,7 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Cmd::Discover => unreachable!(),
         Cmd::Listen { seconds } => {
             let end = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
             while let Some(left) = end.checked_duration_since(std::time::Instant::now()) {

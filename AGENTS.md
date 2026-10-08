@@ -28,6 +28,15 @@ pkill buds-ui; pkill buds-daemon; open target/release/Buds.app
 
 Needs Rust and Xcode 26+ (the UI uses the macOS 26 Liquid Glass API behind `#available`; minimum macOS 14).
 
+## Windows
+
+- `src/win.rs`: WinRT transport. The buds are paired as a classic device and expose no GATT to Windows, so it connects over RFCOMM (service UUID `0000079A-D102-11E1-9B23-00025B00A5A5`, same frames) and keeps GATT as a fallback. `buds discover` lists paired devices and their services. The buds must be connected to the PC (not only paired).
+- `windows/`: Tauri 2 tray app, a thin client of `buds-daemon` (spawns it, forwards command lines, relays JSON state). UI is static files in `windows/ui` (no bundler). Data dir is `%LOCALAPPDATA%\Buds` (`src/paths.rs`).
+- Dev build: `cargo build --bin buds-daemon`, copy `target/debug/buds-daemon.exe` to `windows/src-tauri/binaries/buds-daemon-x86_64-pc-windows-msvc.exe`, then `cd windows && npx tauri build --debug --no-bundle` -> `windows/src-tauri/target/debug/buds-tray.exe`.
+- Auto-update: Tauri updater plugin (`tauri-plugin-updater`). The `windows` job in `release.yml` builds a signed NSIS installer and uploads `Buds-<version>-windows-x64-setup.exe`, its `.sig` and `latest.json` to the same release; the app polls `releases/latest/download/latest.json`. Needs GitHub secret `TAURI_SIGNING_PRIVATE_KEY` (password secret optional, the key has none); the public key is in `windows/src-tauri/tauri.conf.json`. Debug builds never auto-check. Never commit the private key.
+- Shared backend logic lives in `src/insights.rs` (battery history, statistics, notification rules; unit tested). The daemon exposes it through protocol v2, which is opt-in so the Swift app is unaffected: send `hello 2`, then `config <low on|off> <threshold> <conn on|off>` and `history <left|right|case> <hours>`. The daemon records `history.jsonl` and emits `{"event":"connected"|"disconnected"|"low_battery",...}` and `{"stats":{...}}` lines next to the usual state lines. The Swift app still has its own copy of this logic and can be moved to v2 later.
+- Windows translations: `python scripts/gen-win-i18n.py` converts `swift/Localizations/*/Localizable.strings` to `windows/ui/i18n/*.json` (commit the output; CI checks it is current). Windows UI strings reuse the English keys, so add any new key to every `Localizable.strings`.
+
 ## Hardware and sandbox rules
 
 - The agent sandbox has no Bluetooth. Anything that talks to the buds must run in the user's own terminal (`run_in_terminal`) or be tested by the user. Do not claim a Bluetooth feature works from unit tests alone.

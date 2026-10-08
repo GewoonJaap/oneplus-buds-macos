@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buds</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- Text is the English key; i18n.js swaps it for the user's language. -->
+<main id="main" class="page">
+  <button id="update-banner" class="banner" hidden></button>
+  <header>
+    <div>
+      <h1>OnePlus Buds Pro 3</h1>
+      <p id="status" class="muted">Connecting…</p>
+    </div>
+    <div class="actions">
+      <button id="reconnect" class="ghost" data-i18n="Reconnect" hidden>Reconnect</button>
+      <button id="open-stats" class="icon" data-i18n-title="Statistics" title="Statistics" aria-label="Statistics">&#128202;</button>
+      <button id="open-settings" class="icon" data-i18n-title="Settings" title="Settings" aria-label="Settings">&#9881;</button>
+    </div>
+  </header>
+
+  <section class="batteries" id="batteries"></section>
+
+  <section>
+    <h2 data-i18n="Noise Control">Noise Control</h2>
+    <div class="segmented" id="modes"></div>
+    <div class="segmented small" id="nc-levels" hidden></div>
+  </section>
+
+  <section>
+    <h2 data-i18n="Equalizer">Equalizer</h2>
+    <select id="eq"></select>
+  </section>
+
+  <section class="row">
+    <div>
+      <div data-i18n="Game Mode">Game Mode</div>
+      <p class="muted" data-i18n="Reduces latency for games and video.">Reduces latency for games and video.</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="game"><span></span></label>
+  </section>
+
+  <section>
+    <h2 data-i18n="Spatial Audio">Spatial Audio</h2>
+    <div class="list" id="spatial"></div>
+  </section>
+
+  <button id="open-controls" class="nav" data-i18n="Earbud Controls">Earbud Controls</button>
+</main>
+
+<main id="controls" class="page" hidden>
+  <header>
+    <button class="icon back" aria-label="Back">&#8249;</button>
+    <h1 data-i18n="Earbud Controls">Earbud Controls</h1>
+    <span></span>
+  </header>
+  <div class="segmented" id="ctl-side"></div>
+  <section id="ctl-gestures"></section>
+  <section>
+    <h2 data-i18n="Press and Hold Earbuds">Press and Hold Earbuds</h2>
+    <div class="list" id="ctl-hold"></div>
+  </section>
+  <p class="muted" data-i18n="Applies to the selected earbud. Press and Hold cycles listening modes on both.">Applies to the selected earbud. Press and Hold cycles listening modes on both.</p>
+</main>
+
+<main id="stats" class="page" hidden>
+  <header>
+    <button class="icon back" aria-label="Back">&#8249;</button>
+    <h1 data-i18n="Statistics">Statistics</h1>
+    <span></span>
+  </header>
+  <div class="segmented" id="stats-side"></div>
+  <section>
+    <h2 data-i18n="Battery Level">Battery Level</h2>
+    <div id="chart"></div>
+  </section>
+  <div class="segmented" id="stats-hours"></div>
+  <section id="stats-rows"></section>
+</main>
+
+<main id="settings" class="page" hidden>
+  <header>
+    <button class="icon back" aria-label="Back">&#8249;</button>
+    <h1 data-i18n="Settings">Settings</h1>
+    <span></span>
+  </header>
+
+  <section>
+    <h2 data-i18n="General">General</h2>
+    <div class="row"><div><div data-i18n="Launch at Login">Launch at Login</div>
+      <p class="muted" data-i18n="Start Buds when you log in.">Start Buds when you log in.</p></div>
+      <label class="switch"><input type="checkbox" id="autostart"><span></span></label></div>
+  </section>
+
+  <section>
+    <h2 data-i18n="Notifications">Notifications</h2>
+    <div class="row"><div><div data-i18n="Low Battery">Low Battery</div>
+      <p class="muted" data-i18n="Alert when an earbud or the case runs low.">Alert when an earbud or the case runs low.</p></div>
+      <label class="switch"><input type="checkbox" id="notify-low"><span></span></label></div>
+    <div class="row"><span><span data-i18n="Alert At">Alert At</span> <b id="threshold-val">20</b>%</span>
+      <input type="range" id="threshold" min="5" max="50" step="5"></div>
+    <div class="row"><div><div data-i18n="Connection">Connection</div>
+      <p class="muted" data-i18n="Alert when the buds connect or disconnect.">Alert when the buds connect or disconnect.</p></div>
+      <label class="switch"><input type="checkbox" id="notify-conn"><span></span></label></div>
+    <button id="test-notify" class="ghost" data-i18n="Send Test Notification">Send Test Notification</button>
+  </section>
+
+  <section>
+    <h2 data-i18n="Updates">Updates</h2>
+    <div class="row"><div><div data-i18n="Check for Updates Automatically">Check for Updates Automatically</div>
+      <p class="muted" data-i18n="Looks for new releases on GitHub.">Looks for new releases on GitHub.</p></div>
+      <label class="switch"><input type="checkbox" id="auto-check"><span></span></label></div>
+    <div class="row"><div><div data-i18n="Install Updates Automatically">Install Updates Automatically</div>
+      <p class="muted" data-i18n="Downloads and restarts the app when a new version is found.">Downloads and restarts the app when a new version is found.</p></div>
+      <label class="switch"><input type="checkbox" id="auto-install"><span></span></label></div>
+    <div class="row"><span><span data-i18n="Version">Version</span> <b id="version"></b></span>
+      <button id="check-now" class="ghost" data-i18n="Check Now">Check Now</button></div>
+    <p id="update-status" class="muted"></p>
+  </section>
+
+  <section>
+    <button id="quit" class="ghost danger" data-i18n="Quit">Quit</button>
+  </section>
+</main>
+<script src="i18n.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

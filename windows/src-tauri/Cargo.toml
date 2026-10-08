@@ -1,0 +1,21 @@
+[package]
+name = "buds-tray"
+version = "0.1.0"
+edition = "2021"
+description = "Windows tray UI for OnePlus Buds Pro 3 (thin client over buds-daemon)"
+
+[lib]
+name = "buds_tray_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
