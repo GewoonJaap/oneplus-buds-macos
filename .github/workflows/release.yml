@@ -79,6 +79,11 @@ jobs:
           base=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           echo "version=${base%.*}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
+      - name: Check Windows translations are up to date
+        run: |
+          python scripts/gen-win-i18n.py
+          git diff --exit-code windows/ui/i18n
+
       - name: Build daemon sidecar
         run: |
           cargo build --release --bin buds-daemon

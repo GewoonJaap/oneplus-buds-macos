@@ -47,13 +47,22 @@ fn spawn_daemon(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let backend = app.state::<Backend>();
-    *backend.stdin.lock().unwrap() = child.stdin.take();
+    let mut stdin = child.stdin.take();
+    // Protocol v2: the daemon records battery history and emits notification events for us.
+    if let Some(i) = stdin.as_mut() {
+        let _ = writeln!(i, "hello 2");
+        let _ = i.flush();
+    }
+    *backend.stdin.lock().unwrap() = stdin;
     *backend.child.lock().unwrap() = Some(child);
     let app = app.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            *app.state::<Backend>().state.lock().unwrap() = line.clone();
-            let _ = app.emit("state", line);
+            // Only state lines are replayable to a freshly loaded UI; events and stats are one-shot.
+            if line.starts_with("{\"connected\"") {
+                *app.state::<Backend>().state.lock().unwrap() = line.clone();
+            }
+            let _ = app.emit("line", line);
         }
     });
     Ok(())

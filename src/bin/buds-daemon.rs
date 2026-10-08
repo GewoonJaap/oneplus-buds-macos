@@ -1,9 +1,17 @@
-//! Headless Bluetooth worker for the native Swift UI. Reads commands from stdin
-//! (`mode <name>`, `eq <name>`, `spatial <name>`, `reconnect`), writes one JSON state
-//! line per change to stdout and to ~/Library/Application Support/Buds/state.json.
+//! Headless Bluetooth worker shared by all UIs. Reads commands from stdin
+//! (`mode <name>`, `eq <name>`, `spatial <name>`, `reconnect`, ...), writes one JSON state
+//! line per change to stdout and to `<data dir>/state.json`.
+//!
+//! Protocol v2 (opt in with `hello 2`; v1 clients never send it and see no extra output):
+//! - the daemon records battery history (`history.jsonl`) and emits `{"event":...}` lines
+//!   (`connected`, `disconnected`, `low_battery`) using the rules in `buds::insights`;
+//! - `config <low on|off> <threshold> <conn on|off>` sets the notification rules;
+//! - `history <left|right|case> <hours>` answers with one `{"stats":{...}}` line.
 use buds::protocol::{by_name, decode, name_of, parse_gestures, parse_switches, Action, Battery, Cell, Eq, Event, Gesture, Mode, Side, Spatial, SWITCH_GAME};
+use buds::insights::{compute_stats, History, Notifier};
 use buds::session::Session;
 use std::io::{BufRead, Write};
+use std::sync::Mutex;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
@@ -80,7 +88,69 @@ impl State {
     }
 }
 
-fn publish(s: &State, last: &mut String) {
+/// Protocol v2 state: only active once a client sent `hello 2`.
+struct Insights {
+    v2: bool,
+    history: History,
+    notifier: Notifier,
+}
+
+fn now() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
+}
+
+fn emit(v: &serde_json::Value) {
+    println!("{v}");
+    let _ = std::io::stdout().flush();
+}
+
+/// Record history and emit notification events for the current state.
+fn observe(s: &State, ins: &Mutex<Insights>) {
+    let mut g = ins.lock().unwrap();
+    if !g.v2 {
+        return;
+    }
+    if let (true, Some(b)) = (s.connected, s.bat.as_ref()) {
+        g.history.record(b, now());
+    }
+    let notices = g.notifier.evaluate(s.connected, s.bat.as_ref());
+    drop(g);
+    for n in notices {
+        emit(&n.to_json());
+    }
+}
+
+/// v2 commands that need no Bluetooth; handled on the stdin thread so they work while disconnected.
+fn handle_meta(line: &str, ins: &Mutex<Insights>) -> bool {
+    let mut it = line.split_whitespace();
+    match it.next() {
+        Some("hello") => {
+            ins.lock().unwrap().v2 = it.next() == Some("2");
+            true
+        }
+        Some("config") => {
+            let on = |v: Option<&str>| v == Some("on");
+            let mut g = ins.lock().unwrap();
+            g.notifier.low_enabled = on(it.next());
+            if let Some(t) = it.next().and_then(|t| t.parse().ok()) {
+                g.notifier.threshold = t;
+            }
+            g.notifier.conn_enabled = on(it.next());
+            true
+        }
+        Some("history") => {
+            let side = it.next().unwrap_or("left");
+            let hours = it.next().and_then(|h| h.parse().ok()).unwrap_or(24);
+            let g = ins.lock().unwrap();
+            emit(&compute_stats(&g.history.samples, side, hours, now()).to_json());
+            true
+        }
+        _ => false,
+    }
+}
+
+fn publish(s: &State, last: &mut String, ins: &Mutex<Insights>) {
+    observe(s, ins);
     let j = s.json();
     if j == *last {
         return;
@@ -130,9 +200,21 @@ fn refresh_extras(session: &mut Session, st: &mut State) {
 }
 
 fn main() {
+    let history = match buds::paths::data_dir() {
+        Some(dir) => {
+            let _ = std::fs::create_dir_all(&dir);
+            History::load(dir.join("history.jsonl"), now())
+        }
+        None => History::in_memory(),
+    };
+    let ins = std::sync::Arc::new(Mutex::new(Insights { v2: false, history, notifier: Notifier::default() }));
     let (tx, rx) = mpsc::channel();
+    let ins_in = ins.clone();
     std::thread::spawn(move || {
         for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+            if handle_meta(line.trim(), &ins_in) {
+                continue;
+            }
             if let Some(c) = parse_cmd(line.trim()) {
                 let _ = tx.send(c);
             }
@@ -143,7 +225,7 @@ fn main() {
 
     let mut last = String::new();
     let mut st = State::default();
-    publish(&st, &mut last);
+    publish(&st, &mut last, &ins);
     loop {
         let mut session = match Session::open() {
             Ok(s) => s,
@@ -158,7 +240,7 @@ fn main() {
         };
         st.connected = true;
         st.mode = mode;
-        publish(&st, &mut last);
+        publish(&st, &mut last, &ins);
         if let Ok(b) = session.query_battery() {
             st.bat = Some(b);
         }
@@ -169,7 +251,7 @@ fn main() {
             st.sp = m;
         }
         refresh_extras(&mut session, &mut st);
-        publish(&st, &mut last);
+        publish(&st, &mut last, &ins);
 
         let mut last_poll = Instant::now();
         'conn: loop {
@@ -186,7 +268,7 @@ fn main() {
                 if !ok {
                     break 'conn;
                 }
-                publish(&st, &mut last);
+                publish(&st, &mut last, &ins);
             }
             match session.link.rx.recv_timeout(Duration::from_millis(200)) {
                 Ok(raw) => {
@@ -204,7 +286,7 @@ fn main() {
                         Some(Event::Other(0x810C, p)) if p.len() >= 4 && p[1] == 2 => st.hold = Some(p[3]),
                         _ => {}
                     }
-                    publish(&st, &mut last);
+                    publish(&st, &mut last, &ins);
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break 'conn,
@@ -219,11 +301,11 @@ fn main() {
                     st.bat = Some(b);
                 }
                 refresh_extras(&mut session, &mut st);
-                publish(&st, &mut last);
+                publish(&st, &mut last, &ins);
             }
         }
         st = State::default();
-        publish(&st, &mut last);
+        publish(&st, &mut last, &ins);
         drop(session);
         std::thread::sleep(Duration::from_secs(1));
     }

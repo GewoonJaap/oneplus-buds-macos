@@ -66,3 +66,17 @@ input[type=range] { width: 120px; accent-color: var(--accent); }
 .banner:hover { filter: brightness(1.1); background: var(--accent); }
 #check-now { width: auto; }
 html, body { overflow-y: auto; }
+.nav { width: 100%; text-align: left; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.nav::after { content: "›"; float: right; color: var(--muted); }
+.row > div > div { line-height: 1.2; }
+.row p.muted { margin: 2px 0 0; max-width: 220px; }
+select.inline { width: auto; min-width: 150px; }
+.center { text-align: center; padding: 50px 0; }
+#chart svg { width: 100%; height: auto; display: block; }
+#chart .grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+#chart .axis { fill: var(--muted); font-size: 9px; }
+#chart .axis.mid { text-anchor: middle; }
+#chart .bar { fill: var(--ok); }
+#chart .bar.low { fill: var(--low); }
+#chart .span { fill: var(--ok); opacity: .16; }
+#ctl-side, #stats-side, #stats-hours { margin: 0; }
